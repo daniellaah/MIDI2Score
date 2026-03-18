@@ -1,0 +1,30 @@
+model:
+  vocab_size: 160
+  d_model: 64
+  nhead: 4
+  num_layers: 2
+  dim_feedforward: 128
+  dropout: 0.1
+  activation: relu
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+  max_length: 64
+
+data:
+  num_samples: 32
+  vocab_size: 160
+  min_length: 8
+  max_length: 16
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+  seed: 23
+
+training:
+  batch_size: 4
+  learning_rate: 0.001
+  num_steps: 5
+  log_every: 1
+  device: auto
+  save_checkpoint_path: artifacts/pretrained_decoder_baseline.pt

@@ -1,0 +1,35 @@
+model:
+  src_vocab_size: 128     # MIDI token size
+  tgt_vocab_size: 160     # LMX token size
+  d_model: 64             # embedding dimension
+  nhead: 4                # number of attention heads
+  num_encoder_layers: 2   # number of encoder layers
+  num_decoder_layers: 2   # number of decoder layers
+  dim_feedforward: 128    # dimension of the feedforward network
+  dropout: 0.1            # dropout rate
+  activation: relu        # activation function
+  pad_token_id: 0         # padding token ID
+  bos_token_id: 1         # beginning of sequence token ID
+  eos_token_id: 2         # end of sequence token ID
+  max_source_length: 64   # maximum source sequence length
+  max_target_length: 64   # maximum target sequence length
+
+data:
+  num_samples: 32         # number of fake seq2seq samples in the dataset
+  src_vocab_size: 128     # source-side fake token vocabulary size
+  tgt_vocab_size: 160     # target-side fake token vocabulary size
+  min_source_length: 8    # minimum source body length before EOS is appended
+  max_source_length: 16   # maximum source body length before EOS is appended
+  min_target_length: 8    # minimum target body length before BOS/EOS are appended
+  max_target_length: 16   # maximum target body length before BOS/EOS are appended
+  pad_token_id: 0         # padding token ID used during batch collation
+  bos_token_id: 1         # beginning of sequence token ID for target inputs
+  eos_token_id: 2         # end of sequence token ID appended to sequences
+  seed: 17                # random seed for deterministic fake data generation
+
+training:
+  batch_size: 4           # number of samples per optimization step
+  learning_rate: 0.001    # Adam optimizer learning rate
+  num_steps: 5            # total number of training steps to run
+  log_every: 1            # print training loss every N steps
+  device: auto            # device selection: auto, cpu, cuda, or mps
