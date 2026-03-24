@@ -14,6 +14,7 @@ Primary metric:
 Current reference points from [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md):
 
 - historical best step-based run: `d_model=128`, `16000` steps, best validation loss `2.9924`
+- current best 180-second timed run: `d_model=128`, `dim_feedforward=512`, `dropout=0.0`, `learning_rate=7.5e-4`, best validation loss `2.7349`
 
 Important:
 
@@ -65,9 +66,9 @@ Compare against the strongest clean baseline that matches the same training budg
 For new managed runs:
 
 - use a wall-clock budget, not a step budget
-- recommended first timed budget: `180` seconds
-- after the first timed baseline is established, compare later timed runs against that baseline
-- until then, old step-based runs are only rough context
+- default timed budget is now `300` seconds
+- because the budget changed from `180` to `300` seconds, establish a fresh 300-second baseline before promoting new winners
+- until then, old 180-second results are only rough context for choosing search directions
 
 Classify outcomes this way:
 
@@ -78,27 +79,35 @@ Classify outcomes this way:
 ## Required Workflow
 
 1. Read [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md).
-2. Choose one new experiment.
-3. Commit code changes before running the experiment if the worktree is dirty.
-4. Run it with [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py).
-4. Read the generated `summary.json`.
-5. Update [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md) with:
+2. Choose one or more new experiments for the same batch.
+3. Commit code changes before running the batch if the worktree is dirty.
+4. Run the batch with [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py).
+5. Read each generated `summary.json`.
+6. Update [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md) with:
    - a new `EXP-xxx` block
    - what changed
    - the result
    - the conclusion
-6. Give a short recommendation for the next experiment.
+7. Give a short recommendation for the next batch.
+
+Batch rule:
+
+- a single subagent may run multiple experiments in sequence
+- each experiment inside the batch must still change only one meaningful variable relative to the chosen reference config
 
 ## Example Command
 
 ```bash
 uv run python run_experiment.py \
   --base-config configs/pretrain_baseline.yaml \
-  --experiment-id EXP-TIMED-001_dmodel128_baseline \
+  --experiment-id EXP-TIMED-300-001_best180_baseline \
   --set model.d_model=128 \
+  --set model.dim_feedforward=512 \
+  --set model.dropout=0.0 \
+  --set training.learning_rate=0.00075 \
   --set training.num_steps=1000000 \
-  --set training.max_duration_seconds=180 \
-  --note "Timed baseline with current best known width"
+  --set training.max_duration_seconds=300 \
+  --note "300-second baseline with current best 180-second structure"
 ```
 
 ## Notes

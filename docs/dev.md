@@ -276,7 +276,7 @@ uv run python pretrain.py --config configs/pretrain_baseline.yaml
 Run one standardized research experiment:
 
 ```bash
-uv run python run_experiment.py --base-config configs/pretrain_baseline.yaml --experiment-id my-exp --set training.num_steps=1000000 --set training.max_duration_seconds=180 --set model.dropout=0.0
+uv run python run_experiment.py --base-config configs/pretrain_baseline.yaml --experiment-id my-exp --set training.num_steps=1000000 --set training.max_duration_seconds=300 --set model.dropout=0.0
 ```
 
 Default checkpoint output:
@@ -359,7 +359,7 @@ If work continues on decoder pretraining, the most natural next steps are:
 
 1. keep running single-variable experiments and record them in `exp.md`
 2. tune width / depth / dropout / learning rate with `run_experiment.py`
-3. consider a separate full-dataset baseline once rd tuning stabilizes
-4. establish and refresh timed baselines when the training code changes materially
+3. use 300-second timed baselines when the budget policy changes
+4. consider a separate full-dataset baseline once rd tuning stabilizes
 
 If work later returns to seq2seq, the decoder-pretraining artifacts are already being saved in a form that can be reused.
