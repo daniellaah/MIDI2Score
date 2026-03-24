@@ -1416,6 +1416,104 @@ Notes:
   - head_commit: `f1352183e540826e1aadb4a7d39885f42c34d390`
   - worktree clean: `true`
 
+### EXP-031 Timed Batch-Size Extension Sweep
+
+Date:
+
+- 2026-03-24
+
+Change vs previous:
+
+- increased `training.batch_size` above the current best value `8`
+- kept:
+  - `d_model=128`
+  - `dim_feedforward=512`
+  - `dropout=0.0`
+  - `learning_rate=8e-4`
+  - `300` second wall-clock budget
+
+Run:
+
+- batch sweep over `10`, `12`, and `16`
+
+Result:
+
+- `batch_size=10` -> `2.2408`
+- `batch_size=12` -> `2.2561`
+- `batch_size=16` -> `2.2688`
+- all three were worse than the current best reference `2.2140`
+
+Conclusion:
+
+- worse
+- increasing batch size above `8` did not help under the fixed 300-second budget
+- `batch_size=8` should be kept
+
+### EXP-032 Timed Dropout Sweep
+
+Date:
+
+- 2026-03-24
+
+Change vs previous:
+
+- reintroduced small positive dropout values above the current best `0.0`
+- kept:
+  - `d_model=128`
+  - `dim_feedforward=512`
+  - `batch_size=8`
+  - `learning_rate=8e-4`
+  - `300` second wall-clock budget
+
+Run:
+
+- dropout sweep over `0.02`, `0.05`, and `0.08`
+
+Result:
+
+- `dropout=0.02` -> `2.2505`
+- `dropout=0.05` -> `2.2716`
+- `dropout=0.08` -> `2.3201`
+- all three were clear regressions vs `2.2140`
+
+Conclusion:
+
+- worse
+- `dropout > 0.0` is not worth continuing in the current best branch
+
+### EXP-033 Timed Feedforward Extension Sweep
+
+Date:
+
+- 2026-03-24
+
+Change vs previous:
+
+- increased `model.dim_feedforward` beyond the current best promoted value `512`
+- kept:
+  - `d_model=128`
+  - `dropout=0.0`
+  - `batch_size=8`
+  - `learning_rate=8e-4`
+  - `300` second wall-clock budget
+
+Run:
+
+- feedforward sweep over `640`, `768`, and `1024`
+
+Result:
+
+- `dim_feedforward=640` -> `2.2217`
+- `dim_feedforward=768` -> `2.2205`
+- `dim_feedforward=1024` -> `2.2087`
+- only `1024` slightly beat the current promoted reference `2.2140`, but only by `0.0053`
+
+Conclusion:
+
+- no clear effect
+- `1024` is the best observed value in this sweep, but the gain is too small to confidently promote it over `512`
+- this suggests the search is near a plateau
+
 ## Change Summary
 
 Useful changes so far:
@@ -1452,6 +1550,7 @@ No clear effect yet:
 - reducing `training.learning_rate` from `6e-4` to `5e-4` on the current best 300-second candidate
 - increasing `training.learning_rate` from `6e-4` to `7e-4` on the current best 300-second candidate
 - increasing `training.learning_rate` from `7e-4` to `8e-4` on the current best 300-second candidate
+- increasing `model.dim_feedforward` from `512` to `1024` on the current best 300-second candidate
 
 Worse changes:
 
@@ -1464,9 +1563,23 @@ Worse changes:
 - reducing `training.learning_rate` from `6.5e-4` to `5.75e-4` on the current best 300-second candidate
 - reducing `training.batch_size` from `4` to `2` on the current best 300-second candidate
 - reducing `training.batch_size` from `2` to `1` on the current best 300-second candidate
+- increasing `training.batch_size` above `8` on the current best 300-second candidate
+- reintroducing `dropout > 0.0` on the current best 300-second candidate
 
 ## Next Experiment Candidates
 
-- keep `d_model=128`, `dim_feedforward=512`, `dropout=0.0`, `batch_size=8`, `learning_rate=8e-4` as the new current best 300-second candidate
-- use `2.214011838659644` as the new practical timed reference for the next round of search
-- the most promising next knob is likely a narrow learning-rate refinement around `8e-4` under `batch_size=8`, since this batch produced the strongest improvement in this round
+- promoted best stable candidate:
+  - `d_model=128`
+  - `dim_feedforward=512`
+  - `dropout=0.0`
+  - `batch_size=8`
+  - `learning_rate=8e-4`
+  - best validation loss `2.214011838659644`
+- best observed but not yet promoted candidate:
+  - `d_model=128`
+  - `dim_feedforward=1024`
+  - `dropout=0.0`
+  - `batch_size=8`
+  - `learning_rate=8e-4`
+  - best validation loss `2.2087`
+- search appears close to plateau; stop unless there is a strong reason to spend more budget on sub-0.01 improvements
