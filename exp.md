@@ -1583,3 +1583,50 @@ Worse changes:
   - `learning_rate=8e-4`
   - best validation loss `2.2087`
 - search appears close to plateau; stop unless there is a strong reason to spend more budget on sub-0.01 improvements
+
+## Confirmation Pass: ff=512 vs ff=1024
+
+Goal:
+
+- verify whether `dim_feedforward=1024` is stably better than `dim_feedforward=512`
+- keep all other settings fixed at the current best stable timed configuration:
+  - `d_model=128`
+  - `dropout=0.0`
+  - `batch_size=8`
+  - `learning_rate=8e-4`
+  - `num_steps=1000000`
+  - `max_duration_seconds=300`
+
+Run summary:
+
+- `EXP-034_ff512_confirm_A`
+  - `ff=512`
+  - best validation loss: `2.3238879162818193`
+  - elapsed: `300.0077770409989`
+  - final step: `15491`
+  - conclusion: worse
+- `EXP-035_ff512_confirm_B`
+  - `ff=512`
+  - best validation loss: `2.3320015957579017`
+  - elapsed: `300.0084552500048`
+  - final step: `15475`
+  - conclusion: worse
+- `EXP-036_ff1024_confirm_A`
+  - `ff=1024`
+  - best validation loss: `2.30784167163074`
+  - elapsed: `300.0092004580074`
+  - final step: `15465`
+  - conclusion: worse
+- `EXP-037_ff1024_confirm_B`
+  - `ff=1024`
+  - best validation loss: `2.2976198866963387`
+  - elapsed: `300.0094164159964`
+  - final step: `15026`
+  - conclusion: worse
+
+Conclusion:
+
+- `ff=1024` did not show a stable advantage over `ff=512` in this confirmatory pass
+- both `ff=512` reruns and both `ff=1024` reruns were worse than the current recommended stable model from the earlier tuned search
+- `ff=512` should remain the recommended stable model
+- `ff=1024` should not be promoted based on these reruns
