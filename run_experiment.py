@@ -40,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional reference validation loss for automatic delta reporting.",
     )
+    parser.add_argument(
+        "--allow-dirty-git",
+        action="store_true",
+        help="Allow running even when the git worktree is dirty.",
+    )
     return parser
 
 
@@ -52,6 +57,7 @@ def main() -> None:
         overrides=overrides,
         note=args.note,
         reference_best_validation_loss=args.reference_best_loss,
+        require_clean_git=not args.allow_dirty_git,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
 

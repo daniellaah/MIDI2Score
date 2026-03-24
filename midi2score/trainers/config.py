@@ -9,6 +9,7 @@ class TrainingConfig:
     batch_size: int = 8
     learning_rate: float = 1e-3
     num_steps: int = 10
+    max_duration_seconds: float | None = None
     log_every: int = 1
     eval_every: int = 0
     num_eval_batches: int | None = None
@@ -29,6 +30,11 @@ class TrainingConfig:
             raise ValueError(f"learning_rate must be positive, got {self.learning_rate}.")
         if self.num_steps <= 0:
             raise ValueError(f"num_steps must be positive, got {self.num_steps}.")
+        if self.max_duration_seconds is not None and self.max_duration_seconds <= 0.0:
+            raise ValueError(
+                "max_duration_seconds must be positive when provided, "
+                f"got {self.max_duration_seconds}."
+            )
         if self.log_every <= 0:
             raise ValueError(f"log_every must be positive, got {self.log_every}.")
         if self.eval_every < 0:

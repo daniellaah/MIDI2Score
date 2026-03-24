@@ -1,6 +1,7 @@
 from pathlib import Path
 import csv
 
+import pytest
 import torch
 
 from midi2score.data import (
@@ -211,6 +212,47 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
         rows = list(csv.reader(handle))
     logged_steps = [int(row[0]) for row in rows[1:] if row[1] == "train"]
     assert logged_steps == [3, 4]
+
+
+def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "timed.pt"
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=5000,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        max_length=64,
+    )
+    data_config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=64,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+    )
+    training_config = TrainingConfig(
+        batch_size=4,
+        num_steps=10,
+        max_duration_seconds=1.0,
+        log_every=10,
+        eval_every=0,
+        device="cpu",
+        save_checkpoint_path=str(checkpoint_path),
+    )
+
+    clock_values = iter([0.0, 0.6, 1.2, 1.8])
+    monkeypatch.setattr(
+        "midi2score.trainers.pretrain_loop.time.monotonic",
+        lambda: next(clock_values),
+    )
+
+    result = run_decoder_pretraining_loop(model_config, data_config, training_config)
+
+    assert result.stopped_due_to_time_budget is True
+    assert result.final_step == 2
+    assert len(result.losses) == 2
+    assert result.elapsed_seconds == pytest.approx(1.8)
 
 
 def test_seq2seq_can_load_pretrained_decoder_weights() -> None:

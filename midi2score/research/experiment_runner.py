@@ -4,16 +4,24 @@ import json
 import re
 from copy import deepcopy
 from datetime import datetime, UTC
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from midi2score.config import load_decoder_pretrain_config
-from midi2score.trainers import run_decoder_pretraining_loop
+from midi2score.data import LanguageModelDataConfig
+from midi2score.models import DecoderLanguageModelConfig
+from midi2score.research.git_utils import collect_git_metadata, require_clean_git_worktree
+from midi2score.trainers import TrainingConfig, run_decoder_pretraining_loop
 
 _EXPERIMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+_ALLOWED_OVERRIDE_FIELDS = {
+    "model": {field.name for field in fields(DecoderLanguageModelConfig)},
+    "data": {field.name for field in fields(LanguageModelDataConfig)},
+    "training": {field.name for field in fields(TrainingConfig)},
+}
 
 
 @dataclass(slots=True)
@@ -82,14 +90,21 @@ def run_research_experiment(
     experiment_id: str,
     overrides: dict[str, Any],
     output_root: str | Path = ".",
+    repo_root: str | Path = ".",
     note: str | None = None,
     reference_best_validation_loss: float | None = None,
+    require_clean_git: bool = True,
 ) -> dict[str, Any]:
     config_path, paths, resolved_config = build_experiment_config(
         base_config_path=base_config_path,
         experiment_id=experiment_id,
         overrides=overrides,
         output_root=output_root,
+    )
+    git_metadata = (
+        require_clean_git_worktree(repo_root)
+        if require_clean_git
+        else collect_git_metadata(repo_root)
     )
     started_at = datetime.now(UTC)
     project_config = load_decoder_pretrain_config(config_path)
@@ -110,6 +125,8 @@ def run_research_experiment(
         "finished_at": finished_at.isoformat(),
         "best_validation_loss": result.best_validation_loss,
         "final_step": result.final_step,
+        "elapsed_seconds": result.elapsed_seconds,
+        "stopped_due_to_time_budget": result.stopped_due_to_time_budget,
         "device": result.device,
         "resumed_from_checkpoint": result.resumed_from_checkpoint,
         "optimizer_state_loaded": result.optimizer_state_loaded,
@@ -119,6 +136,7 @@ def run_research_experiment(
         "tensorboard_log_dir": str(paths.tensorboard_log_dir.resolve()),
         "summary_path": str(paths.summary_path.resolve()),
         "resolved_config": resolved_config,
+        "git": git_metadata,
     }
     if reference_best_validation_loss is not None and result.best_validation_loss is not None:
         summary["reference_best_validation_loss"] = reference_best_validation_loss
@@ -172,7 +190,8 @@ def _apply_overrides(config: dict[str, Any], overrides: dict[str, Any]) -> None:
             cursor = next_value
 
         leaf_key = parts[-1]
-        if leaf_key not in cursor:
+        root_section = parts[0]
+        if leaf_key not in cursor and leaf_key not in _ALLOWED_OVERRIDE_FIELDS.get(root_section, set()):
             raise ValueError(f"Unknown config field for override {dotted_key!r}.")
         cursor[leaf_key] = value
 

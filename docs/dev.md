@@ -171,6 +171,7 @@ So the current setup is:
   - standardized experiment config generation
   - standardized output paths for research runs
   - experiment summary JSON writing
+  - git metadata capture for experiments
 
 - `run_experiment.py`
   - command-line entrypoint for one controlled tuning run
@@ -214,6 +215,7 @@ So the current setup is:
 - batch size
 - learning rate
 - number of steps
+- optional wall-clock budget in seconds
 - validation frequency
 - optional number of validation batches
 - device
@@ -274,7 +276,7 @@ uv run python pretrain.py --config configs/pretrain_baseline.yaml
 Run one standardized research experiment:
 
 ```bash
-uv run python run_experiment.py --base-config configs/pretrain_baseline.yaml --experiment-id my-exp --set model.dropout=0.0 --reference-best-loss 3.6623
+uv run python run_experiment.py --base-config configs/pretrain_baseline.yaml --experiment-id my-exp --set training.num_steps=1000000 --set training.max_duration_seconds=180 --set model.dropout=0.0
 ```
 
 Default checkpoint output:
@@ -358,6 +360,6 @@ If work continues on decoder pretraining, the most natural next steps are:
 1. keep running single-variable experiments and record them in `exp.md`
 2. tune width / depth / dropout / learning rate with `run_experiment.py`
 3. consider a separate full-dataset baseline once rd tuning stabilizes
-4. if needed later, switch research comparisons from fixed steps to fixed wall-clock budget
+4. establish and refresh timed baselines when the training code changes materially
 
 If work later returns to seq2seq, the decoder-pretraining artifacts are already being saved in a form that can be reused.

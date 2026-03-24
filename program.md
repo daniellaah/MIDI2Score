@@ -13,8 +13,14 @@ Primary metric:
 
 Current reference points from [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md):
 
-- baseline `max_length=256`, `16000` steps: best validation loss `3.6623`
-- `max_length=512` at the same step budget: best validation loss `3.6453`, currently treated as `no clear effect`
+- historical best step-based run: `d_model=128`, `16000` steps, best validation loss `2.9924`
+
+Important:
+
+- historical results before this document update were compared by fixed step budget
+- new automatic experiments must be compared by wall-clock budget instead
+- do not treat the old step-based numbers as a fair timed baseline
+- first create and record a timed baseline before making strong claims about new timed runs
 
 ## Important Files
 
@@ -43,21 +49,25 @@ Preferred knobs:
 - Keep dataset fixed to `data/huggingface`.
 - Keep tokenizer fixed to `data/tokenizer_rd.json`.
 - Do not overwrite baseline checkpoints or baseline logs.
+- Start managed experiments from a clean git worktree.
 - Use [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py) so outputs land under:
   - `configs/research/<experiment_id>.yaml`
   - `artifacts/research/<experiment_id>/`
   - `logs/research/<experiment_id>.csv`
   - `logs/tensorboard/research/<experiment_id>/`
 - Before choosing a new change, read [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md) and avoid repeating experiments.
+- Each experiment summary must record the git commit and branch.
 
 ## Decision Rule
 
 Compare against the strongest clean baseline that matches the same training budget.
 
-For now, use:
+For new managed runs:
 
-- reference best validation loss `3.6623`
-- reference budget `16000` steps on rd data
+- use a wall-clock budget, not a step budget
+- recommended first timed budget: `180` seconds
+- after the first timed baseline is established, compare later timed runs against that baseline
+- until then, old step-based runs are only rough context
 
 Classify outcomes this way:
 
@@ -69,7 +79,8 @@ Classify outcomes this way:
 
 1. Read [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md).
 2. Choose one new experiment.
-3. Run it with [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py).
+3. Commit code changes before running the experiment if the worktree is dirty.
+4. Run it with [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py).
 4. Read the generated `summary.json`.
 5. Update [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md) with:
    - a new `EXP-xxx` block
@@ -83,15 +94,15 @@ Classify outcomes this way:
 ```bash
 uv run python run_experiment.py \
   --base-config configs/pretrain_baseline.yaml \
-  --experiment-id EXP-005_dmodel128 \
+  --experiment-id EXP-TIMED-001_dmodel128_baseline \
   --set model.d_model=128 \
-  --set training.num_steps=16000 \
-  --note "Single-variable width increase from baseline" \
-  --reference-best-loss 3.6623
+  --set training.num_steps=1000000 \
+  --set training.max_duration_seconds=180 \
+  --note "Timed baseline with current best known width"
 ```
 
 ## Notes
 
-- The current project compares runs by fixed step budget, not fixed wall-clock budget.
-- That is an adaptation of the `autoresearch` idea, not a full copy.
-- If you later switch to wall-clock budgeting, first establish a new timed baseline before comparing results.
+- `training.num_steps` still exists as a safety cap, but timed experiments should normally stop because of `training.max_duration_seconds`.
+- [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py) now checks git cleanliness by default.
+- Use `--allow-dirty-git` only for local smoke tests, not for managed research runs.

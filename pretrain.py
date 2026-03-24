@@ -29,6 +29,10 @@ def main() -> None:
         project_config.training,
     )
     print(f"finished {len(result.losses)} pretraining steps on {result.device}")
+    print(
+        f"final_step={result.final_step} elapsed_seconds={result.elapsed_seconds:.2f} "
+        f"stopped_due_to_time_budget={result.stopped_due_to_time_budget}"
+    )
     if result.best_validation_loss is not None:
         print(f"best validation loss {result.best_validation_loss:.4f}")
     if result.checkpoint_path is not None:

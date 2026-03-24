@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -27,6 +28,8 @@ class DecoderPretrainingResult:
     final_step: int
     resumed_from_checkpoint: str | None
     optimizer_state_loaded: bool
+    elapsed_seconds: float
+    stopped_due_to_time_budget: bool
 
 
 def run_decoder_pretraining_loop(
@@ -73,9 +76,19 @@ def run_decoder_pretraining_loop(
             f"start_step={start_step} optimizer_state_loaded={optimizer_state_loaded}"
         )
     data_iterator = iter(train_loader)
+    loop_started_at = time.monotonic()
+    final_step = start_step
+    stopped_due_to_time_budget = False
 
     try:
         for step in range(start_step + 1, training_config.num_steps + 1):
+            if (
+                training_config.max_duration_seconds is not None
+                and step > start_step + 1
+                and time.monotonic() - loop_started_at >= training_config.max_duration_seconds
+            ):
+                stopped_due_to_time_budget = True
+                break
             try:
                 batch = next(data_iterator)
             except StopIteration:
@@ -97,6 +110,7 @@ def run_decoder_pretraining_loop(
 
             loss_value = float(loss.detach().item())
             losses.append(loss_value)
+            final_step = step
             logger.log_scalar(step=step, split="train", loss=loss_value)
 
             if step % training_config.log_every == 0:
@@ -138,6 +152,8 @@ def run_decoder_pretraining_loop(
     finally:
         logger.close()
 
+    elapsed_seconds = time.monotonic() - loop_started_at
+
     if training_config.save_checkpoint_path is not None:
         save_checkpoint(
             training_config.save_checkpoint_path,
@@ -148,9 +164,11 @@ def run_decoder_pretraining_loop(
                 "training_config": training_config.to_dict(),
                 "model_state": model.state_dict(),
                 "optimizer_state": optimizer.state_dict(),
-                "step": training_config.num_steps,
+                "step": final_step,
                 "validation_loss": best_validation_loss,
                 "best_validation_loss": best_validation_loss,
+                "elapsed_seconds": elapsed_seconds,
+                "stopped_due_to_time_budget": stopped_due_to_time_budget,
             },
         )
 
@@ -161,9 +179,11 @@ def run_decoder_pretraining_loop(
         checkpoint_path=training_config.save_checkpoint_path,
         best_checkpoint_path=training_config.save_best_checkpoint_path,
         best_validation_loss=best_validation_loss,
-        final_step=training_config.num_steps,
+        final_step=final_step,
         resumed_from_checkpoint=training_config.resume_checkpoint_path,
         optimizer_state_loaded=optimizer_state_loaded,
+        elapsed_seconds=elapsed_seconds,
+        stopped_due_to_time_budget=stopped_due_to_time_budget,
     )
 
 

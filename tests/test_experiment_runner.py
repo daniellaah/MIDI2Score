@@ -7,6 +7,7 @@ import yaml
 
 from midi2score.research import (
     build_experiment_config,
+    collect_git_metadata,
     parse_override_value,
     run_research_experiment,
 )
@@ -47,6 +48,22 @@ def test_build_experiment_config_writes_standardized_paths(tmp_path: Path) -> No
     )
 
 
+def test_build_experiment_config_allows_valid_new_fields(tmp_path: Path) -> None:
+    config_path, _, resolved_config = build_experiment_config(
+        base_config_path=Path("configs/pretrain_baseline.yaml"),
+        experiment_id="unit-test-time-budget",
+        overrides={
+            "training.max_duration_seconds": 12,
+        },
+        output_root=tmp_path,
+    )
+
+    assert resolved_config["training"]["max_duration_seconds"] == 12
+    with config_path.open("r", encoding="utf-8") as handle:
+        persisted = yaml.safe_load(handle)
+    assert persisted["training"]["max_duration_seconds"] == 12
+
+
 def test_run_research_experiment_writes_summary_and_outputs(tmp_path: Path) -> None:
     summary = run_research_experiment(
         base_config_path=Path("configs/pretrain_baseline.yaml"),
@@ -59,6 +76,7 @@ def test_run_research_experiment_writes_summary_and_outputs(tmp_path: Path) -> N
             "training.device": "cpu",
         },
         output_root=tmp_path,
+        require_clean_git=False,
         note="runner smoke test",
         reference_best_validation_loss=3.6623,
     )
@@ -73,7 +91,19 @@ def test_run_research_experiment_writes_summary_and_outputs(tmp_path: Path) -> N
     assert summary["note"] == "runner smoke test"
     assert summary["best_validation_loss"] is not None
     assert "delta_to_reference" in summary
+    assert "git" in summary
+    assert "head_commit" in summary["git"]
 
     with summary_path.open("r", encoding="utf-8") as handle:
         persisted = json.load(handle)
     assert persisted["resolved_config"]["training"]["device"] == "cpu"
+    assert persisted["git"]["head_commit"] == summary["git"]["head_commit"]
+
+
+def test_collect_git_metadata_reports_repository_state() -> None:
+    metadata = collect_git_metadata(".")
+
+    assert isinstance(metadata["head_commit"], str)
+    assert len(metadata["head_commit"]) >= 7
+    assert isinstance(metadata["branch"], str)
+    assert isinstance(metadata["is_clean"], bool)
