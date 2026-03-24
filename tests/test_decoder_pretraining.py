@@ -3,7 +3,11 @@ import csv
 
 import torch
 
-from midi2score.data import LanguageModelDataConfig, build_language_model_dataloader
+from midi2score.data import (
+    HuggingFaceLanguageModelDataset,
+    LanguageModelDataConfig,
+    build_language_model_dataloader,
+)
 from midi2score.models import (
     DecoderLanguageModelConfig,
     ModelConfig,
@@ -51,6 +55,30 @@ def test_language_model_dataloader_reads_real_dataset() -> None:
     assert batch.input_tokens.shape == batch.output_tokens.shape
     assert batch.padding_mask.dtype == torch.bool
     assert batch.input_tokens[0, 0].item() == data_config.bos_token_id
+
+
+def test_training_random_crop_changes_across_repeated_accesses() -> None:
+    config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=32,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=True,
+        crop_seed=23,
+    )
+    dataset = HuggingFaceLanguageModelDataset(config)
+    long_index = next(
+        index
+        for index in range(len(dataset))
+        if len(dataset.dataset[index]["input_ids"]) > config.max_length * 3
+    )
+
+    first_draws = [dataset[long_index]["tokens"].tolist() for _ in range(8)]
+    second_dataset = HuggingFaceLanguageModelDataset(config)
+    second_draws = [second_dataset[long_index]["tokens"].tolist() for _ in range(8)]
+
+    assert len({tuple(draw) for draw in first_draws}) > 1
+    assert first_draws == second_draws
 
 
 def test_decoder_language_model_forward_produces_vocab_logits() -> None:

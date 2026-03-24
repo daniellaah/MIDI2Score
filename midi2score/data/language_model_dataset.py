@@ -9,7 +9,7 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict, load_from_disk
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, get_worker_info
 
 from midi2score.data.config import LanguageModelDataConfig
 
@@ -41,6 +41,7 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
                 f"Expected a DatasetDict at {config.dataset_path!r}, got {type(dataset_dict)!r}."
             )
         self.dataset: HFDataset = dataset_dict[config.split]
+        self._crop_generators: dict[int, torch.Generator] = {}
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -64,13 +65,25 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
             return token_ids
 
         if self.config.random_crop and self.config.split == "training":
-            generator = torch.Generator().manual_seed(self.config.crop_seed + index)
+            generator = self._get_crop_generator()
             max_start = len(token_ids) - self.config.max_length
             start = int(torch.randint(0, max_start + 1, size=(1,), generator=generator).item())
             return token_ids[start : start + self.config.max_length]
 
         # Validation and test should be deterministic.
         return token_ids[: self.config.max_length]
+
+    def _get_crop_generator(self) -> torch.Generator:
+        worker_info = get_worker_info()
+        worker_id = worker_info.id if worker_info is not None else 0
+        generator = self._crop_generators.get(worker_id)
+        if generator is None:
+            generator = torch.Generator()
+            # Each worker gets its own reproducible random stream so repeated
+            # visits to the same sample can see different windows over time.
+            generator.manual_seed(self.config.crop_seed + 1_000_003 * worker_id)
+            self._crop_generators[worker_id] = generator
+        return generator
 
 
 def collate_language_model_batch(
@@ -104,10 +117,14 @@ def build_language_model_dataloader(
     dataset = HuggingFaceLanguageModelDataset(config)
     if shuffle is None:
         shuffle = config.split == "training"
+    generator = None
+    if config.split == "training":
+        generator = torch.Generator().manual_seed(config.crop_seed)
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
+        generator=generator,
         num_workers=config.num_workers,
         collate_fn=partial(collate_language_model_batch, pad_token_id=config.pad_token_id),
     )
