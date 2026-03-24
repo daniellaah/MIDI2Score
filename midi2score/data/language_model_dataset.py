@@ -5,11 +5,13 @@ from functools import partial
 from typing import TypedDict
 
 import torch
+from datasets import Dataset as HFDataset
+from datasets import DatasetDict, load_from_disk
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 
-from midi2score.data.config import FakeLanguageModelDataConfig
+from midi2score.data.config import LanguageModelDataConfig
 
 
 class LanguageModelExample(TypedDict):
@@ -30,47 +32,45 @@ class LanguageModelBatch:
         )
 
 
-class FakeLanguageModelDataset(Dataset[LanguageModelExample]):
-    def __init__(self, config: FakeLanguageModelDataConfig) -> None:
+class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
+    def __init__(self, config: LanguageModelDataConfig) -> None:
         self.config = config
+        dataset_dict = load_from_disk(config.dataset_path)
+        if not isinstance(dataset_dict, DatasetDict):
+            raise ValueError(
+                f"Expected a DatasetDict at {config.dataset_path!r}, got {type(dataset_dict)!r}."
+            )
+        self.dataset: HFDataset = dataset_dict[config.split]
 
     def __len__(self) -> int:
-        return self.config.num_samples
+        return len(self.dataset)
 
     def __getitem__(self, index: int) -> LanguageModelExample:
         if index < 0 or index >= len(self):
             raise IndexError(f"Index {index} is out of bounds for dataset of size {len(self)}.")
 
-        generator = torch.Generator().manual_seed(self.config.seed + index)
-        body_length = int(
-            torch.randint(
-                self.config.min_length,
-                self.config.max_length + 1,
-                size=(1,),
-                generator=generator,
-            ).item()
-        )
-        semantic_tokens = torch.randint(
-            low=0,
-            high=self.config.resolved_semantic_vocab_size,
-            size=(body_length,),
-            generator=generator,
-            dtype=torch.long,
-        )
+        tokens = self.dataset[index]["input_ids"]
+        tokens = self._trim_tokens(tokens, index=index)
+        if len(tokens) < 2:
+            raise ValueError(f"Sample {index} is shorter than 2 tokens after trimming.")
 
-        # The fake score language has consistent local patterns, giving the
-        # decoder a sequence modeling problem that is not pure noise.
-        body_tokens = (
-            (semantic_tokens * 11 + torch.arange(body_length)) % self.config.resolved_semantic_vocab_size
-        ) + self.config.first_regular_token_id
-        tokens = torch.cat(
-            [
-                torch.tensor([self.config.bos_token_id], dtype=torch.long),
-                body_tokens.to(dtype=torch.long),
-                torch.tensor([self.config.eos_token_id], dtype=torch.long),
-            ]
-        )
+        # The on-disk dataset is already tokenized, so the adapter only converts
+        # lists of ids into tensors and applies optional length control.
+        tokens = torch.tensor(tokens, dtype=torch.long)
         return {"tokens": tokens}
+
+    def _trim_tokens(self, token_ids: list[int], *, index: int) -> list[int]:
+        if len(token_ids) <= self.config.max_length:
+            return token_ids
+
+        if self.config.random_crop and self.config.split == "training":
+            generator = torch.Generator().manual_seed(self.config.crop_seed + index)
+            max_start = len(token_ids) - self.config.max_length
+            start = int(torch.randint(0, max_start + 1, size=(1,), generator=generator).item())
+            return token_ids[start : start + self.config.max_length]
+
+        # Validation and test should be deterministic.
+        return token_ids[: self.config.max_length]
 
 
 def collate_language_model_batch(
@@ -95,18 +95,19 @@ def collate_language_model_batch(
     )
 
 
-def build_fake_language_model_dataloader(
-    config: FakeLanguageModelDataConfig,
+def build_language_model_dataloader(
+    config: LanguageModelDataConfig,
     *,
     batch_size: int,
-    shuffle: bool = False,
-    num_workers: int = 0,
+    shuffle: bool | None = None,
 ) -> DataLoader[LanguageModelBatch]:
-    dataset = FakeLanguageModelDataset(config)
+    dataset = HuggingFaceLanguageModelDataset(config)
+    if shuffle is None:
+        shuffle = config.split == "training"
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
-        num_workers=num_workers,
+        num_workers=config.num_workers,
         collate_fn=partial(collate_language_model_batch, pad_token_id=config.pad_token_id),
     )

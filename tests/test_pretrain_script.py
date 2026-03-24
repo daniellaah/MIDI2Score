@@ -9,7 +9,7 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
         "\n".join(
             [
                 "model:",
-                "  vocab_size: 64",
+                "  vocab_size: 5000",
                 "  d_model: 32",
                 "  nhead: 4",
                 "  num_layers: 2",
@@ -19,23 +19,28 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
                 "  pad_token_id: 0",
                 "  bos_token_id: 1",
                 "  eos_token_id: 2",
-                "  max_length: 32",
+                "  max_length: 64",
                 "data:",
-                "  num_samples: 8",
-                "  vocab_size: 64",
-                "  min_length: 5",
-                "  max_length: 9",
+                "  dataset_path: data/huggingface",
+                "  split: training",
+                "  max_length: 64",
                 "  pad_token_id: 0",
                 "  bos_token_id: 1",
                 "  eos_token_id: 2",
-                "  seed: 41",
+                "  tokenizer_path: data/tokenizer_rd.json",
+                "  random_crop: false",
+                "  crop_seed: 0",
+                "  num_workers: 0",
                 "training:",
                 "  batch_size: 4",
                 "  learning_rate: 0.001",
                 "  num_steps: 2",
                 "  log_every: 1",
+                "  eval_every: 1",
+                "  num_eval_batches: 1",
                 "  device: cpu",
                 f"  save_checkpoint_path: {checkpoint_path}",
+                f"  save_best_checkpoint_path: {tmp_path / 'decoder-best.pt'}",
             ]
         )
         + "\n",
@@ -50,4 +55,5 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
     )
 
     assert "finished 2 pretraining steps on cpu" in result.stdout
+    assert "best validation loss" in result.stdout
     assert checkpoint_path.exists()

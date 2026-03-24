@@ -1,139 +1,66 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 
 @dataclass(slots=True)
-class FakeDataConfig:
-    # This config describes a synthetic seq2seq task that mimics the real
-    # training interface without depending on raw MIDI/MusicXML files.
-    num_samples: int = 128
-    src_vocab_size: int = 512
-    tgt_vocab_size: int = 512
-    min_source_length: int = 8
-    max_source_length: int = 32
-    min_target_length: int = 8
-    max_target_length: int = 32
+class LanguageModelDataConfig:
+    # This points at an on-disk HuggingFace DatasetDict that already contains
+    # tokenized LMX sequences under the `input_ids` field.
+    dataset_path: str
+    split: str = "training"
+    max_length: int = 512
     pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
-    seed: int = 7
-    semantic_vocab_size: int | None = None
+    tokenizer_path: str | None = None
+    random_crop: bool = True
+    crop_seed: int = 0
+    num_workers: int = 0
 
     def __post_init__(self) -> None:
         self.validate()
 
-    @property
-    def first_regular_token_id(self) -> int:
-        return max(self.pad_token_id, self.bos_token_id, self.eos_token_id) + 1
-
-    @property
-    def resolved_semantic_vocab_size(self) -> int:
-        if self.semantic_vocab_size is not None:
-            return self.semantic_vocab_size
-        # The fake task maps both source and target tokens from a shared latent
-        # token space so that the model sees a learnable relationship instead of
-        # completely independent random sequences.
-        return min(
-            self.src_vocab_size - self.first_regular_token_id,
-            self.tgt_vocab_size - self.first_regular_token_id,
-            128,
-        )
-
     def validate(self) -> None:
-        positive_int_fields = {
-            "num_samples": self.num_samples,
-            "src_vocab_size": self.src_vocab_size,
-            "tgt_vocab_size": self.tgt_vocab_size,
-            "min_source_length": self.min_source_length,
-            "max_source_length": self.max_source_length,
-            "min_target_length": self.min_target_length,
-            "max_target_length": self.max_target_length,
-        }
-        for field_name, value in positive_int_fields.items():
-            if value <= 0:
-                raise ValueError(f"{field_name} must be positive, got {value}.")
+        if not self.dataset_path:
+            raise ValueError("dataset_path must be provided.")
+        if self.split not in {"training", "validation", "test"}:
+            raise ValueError(f"split must be training/validation/test, got {self.split!r}.")
+
+        if self.max_length <= 0:
+            raise ValueError(f"max_length must be positive, got {self.max_length}.")
+        if self.num_workers < 0:
+            raise ValueError(f"num_workers must be non-negative, got {self.num_workers}.")
 
         if min(self.pad_token_id, self.bos_token_id, self.eos_token_id) < 0:
             raise ValueError("Special token ids must be non-negative.")
+        if self.max_length < 2:
+            raise ValueError("max_length must be at least 2 for next-token prediction.")
+        if self.crop_seed < 0:
+            raise ValueError("crop_seed must be non-negative.")
+        if self.tokenizer_path is not None and not self.tokenizer_path:
+            raise ValueError("tokenizer_path must be a non-empty string or None.")
 
-        if self.min_source_length > self.max_source_length:
-            raise ValueError("min_source_length cannot be greater than max_source_length.")
-        if self.min_target_length > self.max_target_length:
-            raise ValueError("min_target_length cannot be greater than max_target_length.")
+    def tokenizer_vocab_size(self) -> int | None:
+        if self.tokenizer_path is None:
+            return None
 
-        min_vocab_size = self.first_regular_token_id + 1
-        if self.src_vocab_size < min_vocab_size:
-            raise ValueError(
-                f"src_vocab_size must be at least {min_vocab_size} to fit special tokens."
-            )
-        if self.tgt_vocab_size < min_vocab_size:
-            raise ValueError(
-                f"tgt_vocab_size must be at least {min_vocab_size} to fit special tokens."
-            )
-
-        if self.semantic_vocab_size is not None and self.semantic_vocab_size <= 0:
-            raise ValueError("semantic_vocab_size must be positive when provided.")
-
-        if self.resolved_semantic_vocab_size <= 0:
-            raise ValueError("semantic_vocab_size resolves to zero; enlarge the vocab sizes.")
-
-    def to_dict(self) -> dict[str, int | None]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
-class FakeLanguageModelDataConfig:
-    # This mimics standalone MusicXML language modeling before the decoder sees
-    # any MIDI conditioning information.
-    num_samples: int = 128
-    vocab_size: int = 512
-    min_length: int = 8
-    max_length: int = 32
-    pad_token_id: int = 0
-    bos_token_id: int = 1
-    eos_token_id: int = 2
-    seed: int = 11
-    semantic_vocab_size: int | None = None
-
-    def __post_init__(self) -> None:
-        self.validate()
-
-    @property
-    def first_regular_token_id(self) -> int:
-        return max(self.pad_token_id, self.bos_token_id, self.eos_token_id) + 1
-
-    @property
-    def resolved_semantic_vocab_size(self) -> int:
-        if self.semantic_vocab_size is not None:
-            return self.semantic_vocab_size
-        return min(self.vocab_size - self.first_regular_token_id, 128)
-
-    def validate(self) -> None:
-        positive_int_fields = {
-            "num_samples": self.num_samples,
-            "vocab_size": self.vocab_size,
-            "min_length": self.min_length,
-            "max_length": self.max_length,
+        tokenizer = json.loads(Path(self.tokenizer_path).read_text(encoding="utf-8"))
+        vocab = tokenizer["model"]["vocab"]
+        expected_specials = {
+            "[PAD]": self.pad_token_id,
+            "[BOS]": self.bos_token_id,
+            "[EOS]": self.eos_token_id,
         }
-        for field_name, value in positive_int_fields.items():
-            if value <= 0:
-                raise ValueError(f"{field_name} must be positive, got {value}.")
+        for token, expected_id in expected_specials.items():
+            if vocab.get(token) != expected_id:
+                raise ValueError(
+                    f"Tokenizer special token {token} has id {vocab.get(token)}, "
+                    f"expected {expected_id}."
+                )
+        return len(vocab)
 
-        if self.min_length > self.max_length:
-            raise ValueError("min_length cannot be greater than max_length.")
-        if min(self.pad_token_id, self.bos_token_id, self.eos_token_id) < 0:
-            raise ValueError("Special token ids must be non-negative.")
-
-        min_vocab_size = self.first_regular_token_id + 1
-        if self.vocab_size < min_vocab_size:
-            raise ValueError(
-                f"vocab_size must be at least {min_vocab_size} to fit special tokens."
-            )
-        if self.semantic_vocab_size is not None and self.semantic_vocab_size <= 0:
-            raise ValueError("semantic_vocab_size must be positive when provided.")
-        if self.resolved_semantic_vocab_size <= 0:
-            raise ValueError("semantic_vocab_size resolves to zero; enlarge the vocab size.")
-
-    def to_dict(self) -> dict[str, int | None]:
+    def to_dict(self) -> dict[str, int | str | bool | None]:
         return asdict(self)

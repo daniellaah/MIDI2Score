@@ -1,5 +1,5 @@
 model:
-  vocab_size: 160
+  vocab_size: 5000
   d_model: 64
   nhead: 4
   num_layers: 2
@@ -9,22 +9,30 @@ model:
   pad_token_id: 0
   bos_token_id: 1
   eos_token_id: 2
-  max_length: 64
+  max_length: 256
 
 data:
-  num_samples: 32
-  vocab_size: 160
-  min_length: 8
-  max_length: 16
+  dataset_path: data/huggingface
+  split: training
+  max_length: 256
   pad_token_id: 0
   bos_token_id: 1
   eos_token_id: 2
-  seed: 23
+  tokenizer_path: data/tokenizer_rd.json
+  random_crop: true
+  crop_seed: 23
+  num_workers: 0
 
 training:
   batch_size: 4
   learning_rate: 0.001
-  num_steps: 5
-  log_every: 1
+  num_steps: 16000
+  log_every: 50
+  eval_every: 500
+  num_eval_batches: 64
   device: auto
   save_checkpoint_path: artifacts/pretrained_decoder_baseline.pt
+  save_best_checkpoint_path: artifacts/pretrained_decoder_best.pt
+  resume_checkpoint_path: artifacts/pretrained_decoder_baseline.pt
+  csv_log_path: logs/pretrain_rd.csv
+  tensorboard_log_dir: logs/tensorboard/pretrain_rd

@@ -29,8 +29,12 @@ def main() -> None:
         project_config.training,
     )
     print(f"finished {len(result.losses)} pretraining steps on {result.device}")
+    if result.best_validation_loss is not None:
+        print(f"best validation loss {result.best_validation_loss:.4f}")
     if result.checkpoint_path is not None:
         print(f"saved checkpoint to {result.checkpoint_path}")
+    if result.best_checkpoint_path is not None and result.best_validation_loss is not None:
+        print(f"saved best checkpoint to {result.best_checkpoint_path}")
 
 
 if __name__ == "__main__":

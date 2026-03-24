@@ -1,6 +1,6 @@
 import pytest
 
-from midi2score.data.config import FakeDataConfig
+from midi2score.data.config import LanguageModelDataConfig
 from midi2score.models.config import ModelConfig
 
 
@@ -26,6 +26,6 @@ def test_model_config_rejects_invalid_attention_shape() -> None:
         )
 
 
-def test_fake_data_config_rejects_invalid_sequence_range() -> None:
-    with pytest.raises(ValueError, match="min_source_length"):
-        FakeDataConfig(min_source_length=16, max_source_length=8)
+def test_language_model_data_config_rejects_invalid_split() -> None:
+    with pytest.raises(ValueError, match="split"):
+        LanguageModelDataConfig(dataset_path="data/huggingface", split="train")

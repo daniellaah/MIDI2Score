@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -9,9 +10,14 @@ class TrainingConfig:
     learning_rate: float = 1e-3
     num_steps: int = 10
     log_every: int = 1
+    eval_every: int = 0
+    num_eval_batches: int | None = None
     device: str = "auto"
     save_checkpoint_path: str | None = None
-    pretrained_decoder_checkpoint: str | None = None
+    save_best_checkpoint_path: str | None = None
+    resume_checkpoint_path: str | None = None
+    csv_log_path: str | None = None
+    tensorboard_log_dir: str | None = None
 
     def __post_init__(self) -> None:
         self.validate()
@@ -25,12 +31,28 @@ class TrainingConfig:
             raise ValueError(f"num_steps must be positive, got {self.num_steps}.")
         if self.log_every <= 0:
             raise ValueError(f"log_every must be positive, got {self.log_every}.")
+        if self.eval_every < 0:
+            raise ValueError(f"eval_every must be non-negative, got {self.eval_every}.")
+        if self.num_eval_batches is not None and self.num_eval_batches <= 0:
+            raise ValueError(
+                f"num_eval_batches must be positive when provided, got {self.num_eval_batches}."
+            )
         if self.device not in {"auto", "cpu", "cuda", "mps"}:
             raise ValueError(f"Unsupported device {self.device!r}.")
-        for field_name in ("save_checkpoint_path", "pretrained_decoder_checkpoint"):
+        if self.save_checkpoint_path is not None and not isinstance(self.save_checkpoint_path, str):
+            raise ValueError("save_checkpoint_path must be a string path or None.")
+        if self.save_best_checkpoint_path is not None and not isinstance(
+            self.save_best_checkpoint_path, str
+        ):
+            raise ValueError("save_best_checkpoint_path must be a string path or None.")
+        for field_name in ("resume_checkpoint_path", "csv_log_path", "tensorboard_log_dir"):
             value = getattr(self, field_name)
             if value is not None and not isinstance(value, str):
                 raise ValueError(f"{field_name} must be a string path or None.")
+        if self.resume_checkpoint_path is not None and not Path(self.resume_checkpoint_path).exists():
+            raise ValueError(
+                f"resume_checkpoint_path does not exist: {self.resume_checkpoint_path}"
+            )
 
-    def to_dict(self) -> dict[str, int | float | str]:
+    def to_dict(self) -> dict[str, int | float | str | None]:
         return asdict(self)

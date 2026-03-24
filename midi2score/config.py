@@ -6,45 +6,16 @@ from typing import Any
 
 import yaml
 
-from midi2score.data import FakeDataConfig
-from midi2score.data import FakeLanguageModelDataConfig
-from midi2score.models import DecoderLanguageModelConfig, ModelConfig
+from midi2score.data import LanguageModelDataConfig
+from midi2score.models import DecoderLanguageModelConfig
 from midi2score.trainers import TrainingConfig
-
-
-@dataclass(slots=True)
-class ProjectConfig:
-    model: ModelConfig
-    data: FakeDataConfig
-    training: TrainingConfig
 
 
 @dataclass(slots=True)
 class DecoderPretrainProjectConfig:
     model: DecoderLanguageModelConfig
-    data: FakeLanguageModelDataConfig
+    data: LanguageModelDataConfig
     training: TrainingConfig
-
-
-def load_project_config(path: str | Path) -> ProjectConfig:
-    config_path = Path(path)
-    with config_path.open("r", encoding="utf-8") as handle:
-        raw_config = yaml.safe_load(handle)
-
-    if not isinstance(raw_config, dict):
-        raise ValueError("Top-level config must be a mapping with model/data/training sections.")
-
-    # Keep the YAML-to-dataclass mapping in one place so training code can stay
-    # focused on model execution rather than parsing details.
-    model_section = _get_section(raw_config, "model")
-    data_section = _get_section(raw_config, "data")
-    training_section = _get_section(raw_config, "training")
-
-    return ProjectConfig(
-        model=ModelConfig(**model_section),
-        data=FakeDataConfig(**data_section),
-        training=TrainingConfig(**training_section),
-    )
 
 
 def load_decoder_pretrain_config(path: str | Path) -> DecoderPretrainProjectConfig:
@@ -61,7 +32,7 @@ def load_decoder_pretrain_config(path: str | Path) -> DecoderPretrainProjectConf
 
     return DecoderPretrainProjectConfig(
         model=DecoderLanguageModelConfig(**model_section),
-        data=FakeLanguageModelDataConfig(**data_section),
+        data=LanguageModelDataConfig(**data_section),
         training=TrainingConfig(**training_section),
     )
 
