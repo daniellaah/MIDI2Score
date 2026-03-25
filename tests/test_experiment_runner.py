@@ -93,6 +93,7 @@ def test_run_research_experiment_writes_summary_and_outputs(tmp_path: Path) -> N
     assert "delta_to_reference" in summary
     assert "git" in summary
     assert "head_commit" in summary["git"]
+    assert summary["stopped_due_to_early_stopping"] is False
 
     with summary_path.open("r", encoding="utf-8") as handle:
         persisted = json.load(handle)

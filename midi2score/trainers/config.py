@@ -10,6 +10,8 @@ class TrainingConfig:
     learning_rate: float = 1e-3
     num_steps: int = 10
     max_duration_seconds: float | None = None
+    early_stopping_patience: int | None = None
+    early_stopping_min_delta: float = 0.0
     log_every: int = 1
     eval_every: int = 0
     num_eval_batches: int | None = None
@@ -35,10 +37,22 @@ class TrainingConfig:
                 "max_duration_seconds must be positive when provided, "
                 f"got {self.max_duration_seconds}."
             )
+        if self.early_stopping_patience is not None and self.early_stopping_patience <= 0:
+            raise ValueError(
+                "early_stopping_patience must be positive when provided, "
+                f"got {self.early_stopping_patience}."
+            )
+        if self.early_stopping_min_delta < 0.0:
+            raise ValueError(
+                "early_stopping_min_delta must be non-negative, "
+                f"got {self.early_stopping_min_delta}."
+            )
         if self.log_every <= 0:
             raise ValueError(f"log_every must be positive, got {self.log_every}.")
         if self.eval_every < 0:
             raise ValueError(f"eval_every must be non-negative, got {self.eval_every}.")
+        if self.early_stopping_patience is not None and self.eval_every == 0:
+            raise ValueError("early_stopping_patience requires eval_every > 0.")
         if self.num_eval_batches is not None and self.num_eval_batches <= 0:
             raise ValueError(
                 f"num_eval_batches must be positive when provided, got {self.num_eval_batches}."

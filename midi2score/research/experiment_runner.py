@@ -127,6 +127,7 @@ def run_research_experiment(
         "final_step": result.final_step,
         "elapsed_seconds": result.elapsed_seconds,
         "stopped_due_to_time_budget": result.stopped_due_to_time_budget,
+        "stopped_due_to_early_stopping": result.stopped_due_to_early_stopping,
         "device": result.device,
         "resumed_from_checkpoint": result.resumed_from_checkpoint,
         "optimizer_state_loaded": result.optimizer_state_loaded,

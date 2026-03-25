@@ -35,3 +35,13 @@ def test_language_model_data_config_rejects_invalid_split() -> None:
 def test_training_config_rejects_non_positive_time_budget() -> None:
     with pytest.raises(ValueError, match="max_duration_seconds"):
         TrainingConfig(max_duration_seconds=0.0)
+
+
+def test_training_config_rejects_non_positive_early_stopping_patience() -> None:
+    with pytest.raises(ValueError, match="early_stopping_patience"):
+        TrainingConfig(early_stopping_patience=0, eval_every=1)
+
+
+def test_training_config_requires_eval_for_early_stopping() -> None:
+    with pytest.raises(ValueError, match="eval_every > 0"):
+        TrainingConfig(early_stopping_patience=3, eval_every=0)

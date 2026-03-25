@@ -40,15 +40,21 @@ Last updated: 2026-03-24
 - model-selection metric: validation cross-entropy loss
 - `batch_size = 8`
 - `learning_rate = 8e-4`
-- warm start: resume from the best 300-second recipe
-- final run budget: additional `600` seconds
+- initialization: from scratch
+- run cap: `1800` seconds
+- early stopping:
+  - `eval_every = 500`
+  - `early_stopping_patience = 20`
+  - `early_stopping_min_delta = 0.0`
 - safety cap: `num_steps = 1000000`
 
 ### Final Result
 
-- best validation loss: `2.107256925664842`
-- best checkpoint: `artifacts/research/EXP-FINAL-600-001_dmodel128_ff512_dropout0_lr8e4_bs8_resume/best.pt`
-- latest checkpoint: `artifacts/research/EXP-FINAL-600-001_dmodel128_ff512_dropout0_lr8e4_bs8_resume/latest.pt`
+- best validation loss: `2.0914046755060554`
+- best checkpoint: `artifacts/research/EXP-FINAL-1800-002_dmodel128_ff512_dropout0_lr8e4_bs8_scratch_es20/best.pt`
+- latest checkpoint: `artifacts/research/EXP-FINAL-1800-002_dmodel128_ff512_dropout0_lr8e4_bs8_scratch_es20/latest.pt`
+- actual stop condition: early stopping triggered before the `1800`-second cap
+- note: this slightly outperformed the resumed run (`2.0948`), so it is the clean final recommendation
 
 ## Loss Curves
 

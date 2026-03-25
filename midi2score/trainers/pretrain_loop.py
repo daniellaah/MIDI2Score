@@ -30,6 +30,7 @@ class DecoderPretrainingResult:
     optimizer_state_loaded: bool
     elapsed_seconds: float
     stopped_due_to_time_budget: bool
+    stopped_due_to_early_stopping: bool
 
 
 def run_decoder_pretraining_loop(
@@ -59,8 +60,10 @@ def run_decoder_pretraining_loop(
 
     losses: list[float] = []
     validation_losses: list[tuple[int, float]] = []
-    best_validation_loss: float | None = None
     start_step = 0
+    best_validation_loss: float | None = None
+    best_step = start_step
+    consecutive_non_improving_evals = 0
     optimizer_state_loaded = False
     if training_config.resume_checkpoint_path is not None:
         resume_state = load_checkpoint_for_resume(
@@ -70,6 +73,7 @@ def run_decoder_pretraining_loop(
         )
         start_step = resume_state.start_step
         best_validation_loss = resume_state.best_validation_loss
+        best_step = start_step
         optimizer_state_loaded = resume_state.optimizer_loaded
         print(
             f"resumed_from={training_config.resume_checkpoint_path} "
@@ -79,6 +83,7 @@ def run_decoder_pretraining_loop(
     loop_started_at = time.monotonic()
     final_step = start_step
     stopped_due_to_time_budget = False
+    stopped_due_to_early_stopping = False
 
     try:
         for step in range(start_step + 1, training_config.num_steps + 1):
@@ -128,13 +133,16 @@ def run_decoder_pretraining_loop(
                 logger.log_scalar(step=step, split="validation", loss=validation_loss)
                 print(f"step={step} validation_loss={validation_loss:.4f} device={device}")
 
+                improved = best_validation_loss is None or (
+                    validation_loss < best_validation_loss - training_config.early_stopping_min_delta
+                )
                 if (
                     training_config.save_best_checkpoint_path is not None
-                    and (
-                        best_validation_loss is None or validation_loss < best_validation_loss
-                    )
+                    and improved
                 ):
                     best_validation_loss = validation_loss
+                    best_step = step
+                    consecutive_non_improving_evals = 0
                     save_checkpoint(
                         training_config.save_best_checkpoint_path,
                         {
@@ -149,6 +157,26 @@ def run_decoder_pretraining_loop(
                             "best_validation_loss": best_validation_loss,
                         },
                     )
+                elif improved:
+                    best_validation_loss = validation_loss
+                    best_step = step
+                    consecutive_non_improving_evals = 0
+                else:
+                    consecutive_non_improving_evals += 1
+
+                if (
+                    training_config.early_stopping_patience is not None
+                    and consecutive_non_improving_evals >= training_config.early_stopping_patience
+                ):
+                    stopped_due_to_early_stopping = True
+                    print(
+                        "early_stopping_triggered "
+                        f"step={step} best_step={best_step} "
+                        f"best_validation_loss={best_validation_loss:.4f} "
+                        f"patience={training_config.early_stopping_patience} "
+                        f"min_delta={training_config.early_stopping_min_delta}"
+                    )
+                    break
     finally:
         logger.close()
 
@@ -169,6 +197,7 @@ def run_decoder_pretraining_loop(
                 "best_validation_loss": best_validation_loss,
                 "elapsed_seconds": elapsed_seconds,
                 "stopped_due_to_time_budget": stopped_due_to_time_budget,
+                "stopped_due_to_early_stopping": stopped_due_to_early_stopping,
             },
         )
 
@@ -184,6 +213,7 @@ def run_decoder_pretraining_loop(
         optimizer_state_loaded=optimizer_state_loaded,
         elapsed_seconds=elapsed_seconds,
         stopped_due_to_time_budget=stopped_due_to_time_budget,
+        stopped_due_to_early_stopping=stopped_due_to_early_stopping,
     )
 
 

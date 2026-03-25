@@ -255,6 +255,50 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
     assert result.elapsed_seconds == pytest.approx(1.8)
 
 
+def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "early-stop.pt"
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=5000,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        max_length=64,
+    )
+    data_config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=64,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+    )
+    training_config = TrainingConfig(
+        batch_size=4,
+        num_steps=20,
+        log_every=10,
+        eval_every=2,
+        num_eval_batches=1,
+        early_stopping_patience=2,
+        early_stopping_min_delta=0.0,
+        device="cpu",
+        save_checkpoint_path=str(checkpoint_path),
+    )
+
+    validation_losses = iter([5.0, 5.5, 5.6])
+
+    monkeypatch.setattr(
+        "midi2score.trainers.pretrain_loop.evaluate_decoder_language_model",
+        lambda *args, **kwargs: next(validation_losses),
+    )
+
+    result = run_decoder_pretraining_loop(model_config, data_config, training_config)
+
+    assert result.stopped_due_to_early_stopping is True
+    assert result.stopped_due_to_time_budget is False
+    assert result.final_step == 6
+    assert result.best_validation_loss == pytest.approx(5.0)
+
+
 def test_seq2seq_can_load_pretrained_decoder_weights() -> None:
     torch.manual_seed(0)
     decoder_config = DecoderLanguageModelConfig(
