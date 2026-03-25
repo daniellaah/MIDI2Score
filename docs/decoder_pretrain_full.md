@@ -31,7 +31,7 @@ Last updated: 2026-03-24
 - `batch_size = 8`
 - `learning_rate = 8e-4`
 - data loading: sliding window
-- `sliding_window_stride = 128`
+- `sliding_window_stride = 192`
 - `eval_every = 500`
 - `early_stopping_patience = 20`
 - `early_stopping_min_delta = 0.0`
@@ -40,13 +40,13 @@ Last updated: 2026-03-24
 
 ### Final Result
 
-- best validation loss: `2.3425204092636704`
-- final step: `104000`
-- elapsed seconds: `956.39`
-- best checkpoint: `artifacts/research/EXP-FULL-FINAL-002_sliding256_stride128_dmodel128_ff512_dropout0_lr8e4_bs8_es20/best.pt`
-- latest checkpoint: `artifacts/research/EXP-FULL-FINAL-002_sliding256_stride128_dmodel128_ff512_dropout0_lr8e4_bs8_es20/latest.pt`
+- best validation loss: `2.312939427793026`
+- final step: `147000`
+- elapsed seconds: `1632.25`
+- best checkpoint: `artifacts/research/EXP-FULL-FINAL-004_sliding256_stride192_dmodel128_ff512_dropout0_lr8e4_bs8_es20/best.pt`
+- latest checkpoint: `artifacts/research/EXP-FULL-FINAL-004_sliding256_stride192_dmodel128_ff512_dropout0_lr8e4_bs8_es20/latest.pt`
 
 ## Note
 
 - this is the current recommended result on `huggingface_full`
-- compared with the random-crop full baseline (`2.4494`), sliding window improved validation loss to `2.3425`
+- compared with the random-crop full baseline (`2.4494`), sliding window with `stride=192` improved validation loss to `2.3129`
