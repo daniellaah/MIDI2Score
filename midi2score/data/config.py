@@ -18,6 +18,7 @@ class LanguageModelDataConfig:
     tokenizer_path: str | None = None
     random_crop: bool = True
     crop_seed: int = 0
+    sliding_window_stride: int | None = None
     num_workers: int = 0
 
     def __post_init__(self) -> None:
@@ -40,6 +41,11 @@ class LanguageModelDataConfig:
             raise ValueError("max_length must be at least 2 for next-token prediction.")
         if self.crop_seed < 0:
             raise ValueError("crop_seed must be non-negative.")
+        if self.sliding_window_stride is not None and self.sliding_window_stride <= 0:
+            raise ValueError(
+                "sliding_window_stride must be positive when provided, "
+                f"got {self.sliding_window_stride}."
+            )
         if self.tokenizer_path is not None and not self.tokenizer_path:
             raise ValueError("tokenizer_path must be a non-empty string or None.")
 

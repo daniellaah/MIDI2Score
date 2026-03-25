@@ -42,16 +42,22 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
             )
         self.dataset: HFDataset = dataset_dict[config.split]
         self._crop_generators: dict[int, torch.Generator] = {}
+        self._window_index: list[tuple[int, int]] | None = None
+        if config.sliding_window_stride is not None:
+            self._window_index = self._build_window_index()
 
     def __len__(self) -> int:
+        if self._window_index is not None:
+            return len(self._window_index)
         return len(self.dataset)
 
     def __getitem__(self, index: int) -> LanguageModelExample:
         if index < 0 or index >= len(self):
             raise IndexError(f"Index {index} is out of bounds for dataset of size {len(self)}.")
 
-        tokens = self.dataset[index]["input_ids"]
-        tokens = self._trim_tokens(tokens, index=index)
+        raw_index, window_start = self._resolve_index(index)
+        tokens = self.dataset[raw_index]["input_ids"]
+        tokens = self._trim_tokens(tokens, index=raw_index, window_start=window_start)
         if len(tokens) < 2:
             raise ValueError(f"Sample {index} is shorter than 2 tokens after trimming.")
 
@@ -60,9 +66,18 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
         tokens = torch.tensor(tokens, dtype=torch.long)
         return {"tokens": tokens}
 
-    def _trim_tokens(self, token_ids: list[int], *, index: int) -> list[int]:
+    def _trim_tokens(
+        self,
+        token_ids: list[int],
+        *,
+        index: int,
+        window_start: int | None,
+    ) -> list[int]:
         if len(token_ids) <= self.config.max_length:
             return token_ids
+
+        if window_start is not None:
+            return token_ids[window_start : window_start + self.config.max_length]
 
         if self.config.random_crop and self.config.split == "training":
             generator = self._get_crop_generator()
@@ -72,6 +87,30 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
 
         # Validation and test should be deterministic.
         return token_ids[: self.config.max_length]
+
+    def _resolve_index(self, index: int) -> tuple[int, int | None]:
+        if self._window_index is None:
+            return index, None
+        return self._window_index[index]
+
+    def _build_window_index(self) -> list[tuple[int, int]]:
+        stride = self.config.sliding_window_stride
+        if stride is None:
+            return []
+
+        window_index: list[tuple[int, int]] = []
+        for raw_index in range(len(self.dataset)):
+            token_ids = self.dataset[raw_index]["input_ids"]
+            if len(token_ids) <= self.config.max_length:
+                window_index.append((raw_index, 0))
+                continue
+
+            max_start = len(token_ids) - self.config.max_length
+            starts = list(range(0, max_start + 1, stride))
+            if starts[-1] != max_start:
+                starts.append(max_start)
+            window_index.extend((raw_index, start) for start in starts)
+        return window_index
 
     def _get_crop_generator(self) -> torch.Generator:
         worker_info = get_worker_info()

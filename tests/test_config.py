@@ -45,3 +45,11 @@ def test_training_config_rejects_non_positive_early_stopping_patience() -> None:
 def test_training_config_requires_eval_for_early_stopping() -> None:
     with pytest.raises(ValueError, match="eval_every > 0"):
         TrainingConfig(early_stopping_patience=3, eval_every=0)
+
+
+def test_language_model_data_config_rejects_non_positive_sliding_window_stride() -> None:
+    with pytest.raises(ValueError, match="sliding_window_stride"):
+        LanguageModelDataConfig(
+            dataset_path="data/huggingface",
+            sliding_window_stride=0,
+        )
