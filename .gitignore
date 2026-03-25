@@ -12,4 +12,5 @@ __pycache__/
 docs/*
 !docs/dev.md
 !docs/decoder_pretrain.md
+!docs/decoder_pretrain_full.md
 !docs/decoder_pretrain_losses.svg
