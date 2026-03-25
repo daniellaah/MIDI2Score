@@ -9,7 +9,7 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict, load_from_disk
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, Dataset, get_worker_info
+from torch.utils.data import BatchSampler, DataLoader, Dataset, Sampler, get_worker_info
 
 from midi2score.data.config import LanguageModelDataConfig
 
@@ -65,6 +65,17 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
         # lists of ids into tensors and applies optional length control.
         tokens = torch.tensor(tokens, dtype=torch.long)
         return {"tokens": tokens}
+
+    def sequence_length(self, index: int) -> int:
+        raw_index, window_start = self._resolve_index(index)
+        token_ids = self.dataset[raw_index]["input_ids"]
+        if len(token_ids) <= self.config.max_length:
+            return len(token_ids)
+        if window_start is not None:
+            return self.config.max_length
+        if self.config.random_crop and self.config.split == "training":
+            return self.config.max_length
+        return self.config.max_length
 
     def _trim_tokens(
         self,
@@ -125,6 +136,51 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
         return generator
 
 
+class LengthBucketBatchSampler(BatchSampler):
+    def __init__(
+        self,
+        *,
+        dataset: HuggingFaceLanguageModelDataset,
+        batch_size: int,
+        drop_last: bool,
+        seed: int,
+        bucket_size_multiplier: int,
+    ) -> None:
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.seed = seed
+        self.bucket_size_multiplier = bucket_size_multiplier
+        self._epoch = 0
+        self._lengths = [dataset.sequence_length(index) for index in range(len(dataset))]
+
+    def __iter__(self):
+        generator = torch.Generator().manual_seed(self.seed + self._epoch)
+        self._epoch += 1
+        indices = torch.randperm(len(self.dataset), generator=generator).tolist()
+        bucket_size = self.batch_size * self.bucket_size_multiplier
+        batches: list[list[int]] = []
+
+        for start in range(0, len(indices), bucket_size):
+            pool = indices[start : start + bucket_size]
+            pool.sort(key=self._lengths.__getitem__, reverse=True)
+            for batch_start in range(0, len(pool), self.batch_size):
+                batch = pool[batch_start : batch_start + self.batch_size]
+                if len(batch) == self.batch_size:
+                    batches.append(batch)
+                elif not self.drop_last:
+                    batches.append(batch)
+
+        batch_order = torch.randperm(len(batches), generator=generator).tolist()
+        for batch_index in batch_order:
+            yield batches[batch_index]
+
+    def __len__(self) -> int:
+        if self.drop_last:
+            return len(self.dataset) // self.batch_size
+        return (len(self.dataset) + self.batch_size - 1) // self.batch_size
+
+
 def collate_language_model_batch(
     examples: list[LanguageModelExample],
     *,
@@ -157,13 +213,26 @@ def build_language_model_dataloader(
     if shuffle is None:
         shuffle = config.split == "training"
     generator = None
-    if config.split == "training":
+    batch_sampler = None
+    if config.split == "training" and config.length_bucketing:
+        batch_sampler = LengthBucketBatchSampler(
+            dataset=dataset,
+            batch_size=batch_size,
+            drop_last=False,
+            seed=config.crop_seed,
+            bucket_size_multiplier=config.bucket_size_multiplier,
+        )
+    elif config.split == "training":
         generator = torch.Generator().manual_seed(config.crop_seed)
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        generator=generator,
-        num_workers=config.num_workers,
-        collate_fn=partial(collate_language_model_batch, pad_token_id=config.pad_token_id),
-    )
+    dataloader_kwargs = {
+        "dataset": dataset,
+        "num_workers": config.num_workers,
+        "collate_fn": partial(collate_language_model_batch, pad_token_id=config.pad_token_id),
+    }
+    if batch_sampler is not None:
+        dataloader_kwargs["batch_sampler"] = batch_sampler
+    else:
+        dataloader_kwargs["batch_size"] = batch_size
+        dataloader_kwargs["shuffle"] = shuffle
+        dataloader_kwargs["generator"] = generator
+    return DataLoader(**dataloader_kwargs)

@@ -19,6 +19,8 @@ class LanguageModelDataConfig:
     random_crop: bool = True
     crop_seed: int = 0
     sliding_window_stride: int | None = None
+    length_bucketing: bool = False
+    bucket_size_multiplier: int = 50
     num_workers: int = 0
 
     def __post_init__(self) -> None:
@@ -45,6 +47,11 @@ class LanguageModelDataConfig:
             raise ValueError(
                 "sliding_window_stride must be positive when provided, "
                 f"got {self.sliding_window_stride}."
+            )
+        if self.bucket_size_multiplier <= 0:
+            raise ValueError(
+                "bucket_size_multiplier must be positive, "
+                f"got {self.bucket_size_multiplier}."
             )
         if self.tokenizer_path is not None and not self.tokenizer_path:
             raise ValueError("tokenizer_path must be a non-empty string or None.")

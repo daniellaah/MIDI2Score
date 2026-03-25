@@ -9,6 +9,7 @@ from midi2score.data import (
     LanguageModelDataConfig,
     build_language_model_dataloader,
 )
+from midi2score.data.language_model_dataset import LengthBucketBatchSampler
 from midi2score.models import (
     DecoderLanguageModelConfig,
     ModelConfig,
@@ -115,6 +116,31 @@ def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
     )
     example = dataset[last_window_dataset_index]
     assert example["tokens"].tolist() == raw_tokens[starts[-1] : starts[-1] + config.max_length]
+
+
+def test_length_bucket_batch_sampler_groups_examples_by_length() -> None:
+    config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=64,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+        length_bucketing=True,
+        bucket_size_multiplier=8,
+    )
+    dataset = HuggingFaceLanguageModelDataset(config)
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=4,
+        drop_last=False,
+        seed=23,
+        bucket_size_multiplier=config.bucket_size_multiplier,
+    )
+
+    batch_indices = next(iter(sampler))
+    lengths = [dataset.sequence_length(index) for index in batch_indices]
+
+    assert lengths == sorted(lengths, reverse=True)
 
 
 def test_decoder_language_model_forward_produces_vocab_logits() -> None:

@@ -53,3 +53,11 @@ def test_language_model_data_config_rejects_non_positive_sliding_window_stride()
             dataset_path="data/huggingface",
             sliding_window_stride=0,
         )
+
+
+def test_language_model_data_config_rejects_non_positive_bucket_size_multiplier() -> None:
+    with pytest.raises(ValueError, match="bucket_size_multiplier"):
+        LanguageModelDataConfig(
+            dataset_path="data/huggingface",
+            bucket_size_multiplier=0,
+        )
