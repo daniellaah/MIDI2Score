@@ -30,6 +30,8 @@ Last updated: 2026-03-24
 - model-selection metric: validation cross-entropy loss
 - `batch_size = 8`
 - `learning_rate = 8e-4`
+- data loading: sliding window
+- `sliding_window_stride = 128`
 - `eval_every = 500`
 - `early_stopping_patience = 20`
 - `early_stopping_min_delta = 0.0`
@@ -38,12 +40,13 @@ Last updated: 2026-03-24
 
 ### Final Result
 
-- best validation loss: `2.4494016766548157`
-- final step: `137500`
-- elapsed seconds: `1351.05`
-- best checkpoint: `artifacts/research/EXP-FULL-FINAL-001_dmodel128_ff512_dropout0_lr8e4_bs8_es20/best.pt`
-- latest checkpoint: `artifacts/research/EXP-FULL-FINAL-001_dmodel128_ff512_dropout0_lr8e4_bs8_es20/latest.pt`
+- best validation loss: `2.3425204092636704`
+- final step: `104000`
+- elapsed seconds: `956.39`
+- best checkpoint: `artifacts/research/EXP-FULL-FINAL-002_sliding256_stride128_dmodel128_ff512_dropout0_lr8e4_bs8_es20/best.pt`
+- latest checkpoint: `artifacts/research/EXP-FULL-FINAL-002_sliding256_stride128_dmodel128_ff512_dropout0_lr8e4_bs8_es20/latest.pt`
 
 ## Note
 
-- this is the current baseline result on `huggingface_full`
+- this is the current recommended result on `huggingface_full`
+- compared with the random-crop full baseline (`2.4494`), sliding window improved validation loss to `2.3425`
