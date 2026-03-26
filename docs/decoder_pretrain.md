@@ -1,6 +1,6 @@
 # Decoder Pretraining
 
-Last updated: 2026-03-24
+Last updated: 2026-03-25
 
 ## Final Recommended Model
 
@@ -15,9 +15,10 @@ Last updated: 2026-03-24
 ### Input
 
 - one dataset row produces one token sequence
-- `max_length = 256`
+- `max_length = 1024`
 - training: random contiguous crop for overlength samples
 - validation / test: deterministic prefix crop for overlength samples
+- training batches use length bucketing
 - batch padding: dynamic
 - language-model targets:
   - `input_tokens = tokens[:, :-1]`
@@ -27,10 +28,10 @@ Last updated: 2026-03-24
 
 - model type: decoder-only Transformer language model
 - vocab size: `5000`
-- `d_model = 128`
+- `d_model = 256`
 - `nhead = 4`
 - `num_layers = 2`
-- `dim_feedforward = 512`
+- `dim_feedforward = 1024`
 - `dropout = 0.0`
 - positional encoding: sinusoidal
 
@@ -41,20 +42,20 @@ Last updated: 2026-03-24
 - `batch_size = 8`
 - `learning_rate = 8e-4`
 - initialization: from scratch
-- run cap: `1800` seconds
+- run cap: `3600` seconds
+- validation cadence: `eval_every = 500`
 - early stopping:
-  - `eval_every = 500`
   - `early_stopping_patience = 20`
   - `early_stopping_min_delta = 0.0`
 - safety cap: `num_steps = 1000000`
 
 ### Final Result
 
-- best validation loss: `2.0914046755060554`
-- best checkpoint: `artifacts/research/EXP-FINAL-1800-002_dmodel128_ff512_dropout0_lr8e4_bs8_scratch_es20/best.pt`
-- latest checkpoint: `artifacts/research/EXP-FINAL-1800-002_dmodel128_ff512_dropout0_lr8e4_bs8_scratch_es20/latest.pt`
-- actual stop condition: early stopping triggered before the `1800`-second cap
-- note: this slightly outperformed the resumed run (`2.0948`), so it is the clean final recommendation
+- best validation loss: `1.9615836385637522`
+- best checkpoint: `artifacts/research/EXP-RD-LONGCTX-004_crop1024_bucket_dmodel256_ff1024_bs8_fullbudget/best.pt`
+- latest checkpoint: `artifacts/research/EXP-RD-LONGCTX-004_crop1024_bucket_dmodel256_ff1024_bs8_fullbudget/latest.pt`
+- actual stop condition: early stopping before the `3600`-second cap
+- note: this replaced the previous short-context recommendation (`2.0914`)
 
 ## Loss Curves
 

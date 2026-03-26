@@ -1630,3 +1630,112 @@ Conclusion:
 - both `ff=512` reruns and both `ff=1024` reruns were worse than the current recommended stable model from the earlier tuned search
 - `ff=512` should remain the recommended stable model
 - `ff=1024` should not be promoted based on these reruns
+
+## 2026-03-25 Full-Data Update
+
+Goal:
+
+- move from the earlier `huggingface_full` baseline to a stronger full-data recommendation
+- test whether sliding-window tuning, length bucketing, and long-context runs can beat the short-context setup
+
+Key results:
+
+- `EXP-FULL-FINAL-005_stride192_dmodel256_ff512_dropout0_lr8e4_bs8_es20`
+  - change: `d_model 128 -> 256`
+  - best validation loss: `2.3426`
+  - conclusion: worse
+- `EXP-FULL-FINAL-006_stride192_dmodel128_ff1024_dropout0_lr8e4_bs8_es20`
+  - change: `dim_feedforward 512 -> 1024`
+  - best validation loss: `2.2797`
+  - conclusion: useful
+- `EXP-FULL-FINAL-007_stride160_dmodel128_ff1024_dropout0_lr8e4_bs8_es20`
+  - change: `sliding_window_stride 192 -> 160`
+  - best validation loss: `2.2531`
+  - conclusion: useful
+- `EXP-FULL-FINAL-008_stride224_dmodel128_ff1024_dropout0_lr8e4_bs8_es20`
+  - change: `sliding_window_stride 192 -> 224`
+  - best validation loss: `2.2735`
+  - conclusion: no clear effect
+- `EXP-FULL-FINAL-009_stride160_ff1024_bucketed_dmodel128_lr8e4_bs8_es20`
+  - change: enable `length_bucketing`
+  - best validation loss: `2.2954`
+  - conclusion: worse
+- `EXP-FULL-FINAL-010_stride160_dmodel128_ff1024_dropout0_lr8e4_bs8_es20_long`
+  - change: longer budget on the current full best
+  - best validation loss: `2.2726`
+  - conclusion: no clear effect
+
+Current recommended full-data model:
+
+- dataset: `data/huggingface_full`
+- tokenizer: `data/tokenizer_full.json`
+- `max_length=256`
+- sliding window enabled
+- `sliding_window_stride=160`
+- `d_model=128`
+- `dim_feedforward=1024`
+- `dropout=0.0`
+- `batch_size=8`
+- `learning_rate=8e-4`
+- best validation loss: `2.2531`
+
+Long-context full-data branch:
+
+- `1024` and `2048` without bucketing were too slow and clearly worse under fixed budget
+- bucketing was necessary for long-context throughput:
+  - `EXP-FULL-LONGCTX-001_crop1024_ff1024_bs8_nobucket` -> `4.1969`
+  - `EXP-FULL-LONGCTX-002_crop1024_ff1024_bs8_bucket` -> `3.2807`
+  - `EXP-FULL-LONGCTX-003_crop2048_ff1024_bs4_nobucket` -> `5.2889`
+  - `EXP-FULL-LONGCTX-004_crop2048_ff1024_bs4_bucket` -> `4.1662`
+- stronger long-context model:
+  - `EXP-FULL-LONGCTX-006_crop1024_bucket_dmodel256_ff1024_bs8_smoke` -> `3.0660`
+  - `EXP-FULL-LONGCTX-007_crop1024_bucket_dmodel256_ff1024_bs8_long` -> `2.4013`
+- conclusion:
+  - `1024 + bucketing` is viable
+  - but it still does not beat the recommended `256 + sliding` full-data model
+
+## 2026-03-25 rd Update
+
+Goal:
+
+- revisit the rd recommendation with long-context training after full-data experiments showed that long-context only worked well when paired with bucketing and larger capacity
+
+Key results:
+
+- `EXP-RD-LONGCTX-001_crop1024_bucket_dmodel128_ff512_bs8_smoke`
+  - change: first `rd` long-context smoke run
+  - best validation loss: `3.4546`
+  - conclusion: worse
+- `EXP-RD-LONGCTX-002_crop1024_bucket_dmodel256_ff1024_bs8_smoke`
+  - change: increase long-context model capacity
+  - best validation loss: `2.5439`
+  - conclusion: useful
+- `EXP-RD-LONGCTX-003_crop1024_bucket_dmodel256_ff1024_bs8_long`
+  - change: longer budget, but still capped by the old `num_steps=16000`
+  - best validation loss: `2.0765`
+  - conclusion: useful
+- `EXP-RD-LONGCTX-004_crop1024_bucket_dmodel256_ff1024_bs8_fullbudget`
+  - change: true full-budget rerun with `num_steps=1000000`
+  - best validation loss: `1.9616`
+  - conclusion: useful
+
+Current recommended rd model:
+
+- dataset: `data/huggingface`
+- tokenizer: `data/tokenizer_rd.json`
+- `max_length=1024`
+- random crop training with `length_bucketing=true`
+- `d_model=256`
+- `dim_feedforward=1024`
+- `dropout=0.0`
+- `batch_size=8`
+- `learning_rate=8e-4`
+- best validation loss: `1.9616`
+
+Main takeaways:
+
+- on `rd`, long-context training only became competitive after all three changes were combined:
+  - longer context
+  - length bucketing
+  - larger model capacity
+- after those changes, the long-context branch beat the earlier short-context rd best (`2.0914`)
