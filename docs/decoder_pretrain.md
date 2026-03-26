@@ -165,4 +165,9 @@ flowchart TD
 - `300s` smoke comparison on the current best `rd` branch:
   - sinusoidal: best validation loss `2.2893`
   - learned absolute positional embedding: best validation loss `3.5420`
-- conclusion: learned absolute position embeddings were clearly worse in the current setup, so they were not promoted to a long-budget run
+  - ALiBi: best validation loss `3.4845`
+- `3600s` long-budget comparison:
+  - sinusoidal: best validation loss `1.8039`
+  - learned absolute positional embedding: best validation loss `2.4982`
+  - ALiBi: best validation loss `2.6788`
+- conclusion: both learned absolute positional embeddings and ALiBi remained clearly worse after long-budget training, so sinusoidal stays the recommended choice

@@ -1790,6 +1790,19 @@ Key results:
   - result: best validation loss `3.5420`
   - reference smoke baseline on the same branch: `2.2893` with sinusoidal
   - conclusion: worse
+- `EXP-RD-POSENC-002_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_alibi_smoke`
+  - change: replace sinusoidal positional encoding with ALiBi
+  - result: best validation loss `3.4845`
+  - reference smoke baseline on the same branch: `2.2893` with sinusoidal
+  - conclusion: worse
+- `EXP-RD-POSENC-003_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_learned_long`
+  - change: long-budget follow-up for learned absolute position embeddings
+  - result: best validation loss `2.4982`
+  - conclusion: worse
+- `EXP-RD-POSENC-004_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_alibi_long`
+  - change: long-budget follow-up for ALiBi
+  - result: best validation loss `2.6788`
+  - conclusion: worse
 - `EXP-RD-LONGCTX-021_crop1024_bucket_dmodel256_ff1024_lr6e4_dropout005_bs8_smoke`
   - change: set `dropout = 0.05`
   - result: best validation loss `3.7221`
