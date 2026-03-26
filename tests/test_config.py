@@ -2,6 +2,7 @@ import pytest
 
 from midi2score.data.config import LanguageModelDataConfig
 from midi2score.models.config import ModelConfig
+from midi2score.models.decoder_config import DecoderLanguageModelConfig
 from midi2score.trainers import TrainingConfig
 
 
@@ -75,4 +76,12 @@ def test_language_model_data_config_rejects_non_positive_bucket_size_multiplier(
         LanguageModelDataConfig(
             dataset_path="data/huggingface",
             bucket_size_multiplier=0,
+        )
+
+
+def test_decoder_language_model_config_rejects_unknown_position_encoding() -> None:
+    with pytest.raises(ValueError, match="position_encoding_type"):
+        DecoderLanguageModelConfig(
+            vocab_size=128,
+            position_encoding_type="rope",
         )

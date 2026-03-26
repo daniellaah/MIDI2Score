@@ -14,6 +14,7 @@ class DecoderLanguageModelConfig:
     dim_feedforward: int = 1024
     dropout: float = 0.1
     activation: str = "relu"
+    position_encoding_type: str = "sinusoidal"
     pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
@@ -48,6 +49,11 @@ class DecoderLanguageModelConfig:
         if self.activation not in {"relu", "gelu"}:
             raise ValueError(
                 f"activation must be one of {{'relu', 'gelu'}}, got {self.activation!r}."
+            )
+        if self.position_encoding_type not in {"sinusoidal", "learned", "alibi"}:
+            raise ValueError(
+                "position_encoding_type must be one of "
+                f"{{'sinusoidal', 'learned', 'alibi'}}, got {self.position_encoding_type!r}."
             )
         if min(self.pad_token_id, self.bos_token_id, self.eos_token_id) < 0:
             raise ValueError("Special token ids must be non-negative.")

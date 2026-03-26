@@ -30,6 +30,73 @@ class SinusoidalPositionalEncoding(nn.Module):
         return self.encoding[:, : tokens.size(1)]
 
 
+class LearnedPositionalEncoding(nn.Module):
+    """Learned absolute position embeddings."""
+
+    def __init__(self, d_model: int, max_length: int) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(max_length, d_model)
+
+    def forward(self, tokens: Tensor) -> Tensor:
+        positions = torch.arange(tokens.size(1), device=tokens.device).unsqueeze(0)
+        return self.embedding(positions)
+
+
+class ZeroPositionalEncoding(nn.Module):
+    """No additive positional embedding; useful for ALiBi-style attention bias."""
+
+    def __init__(self, d_model: int) -> None:
+        super().__init__()
+        self.d_model = d_model
+
+    def forward(self, tokens: Tensor) -> Tensor:
+        return torch.zeros(
+            (1, tokens.size(1), self.d_model),
+            dtype=torch.float32,
+            device=tokens.device,
+        )
+
+
+def build_positional_encoding(
+    *,
+    encoding_type: str,
+    d_model: int,
+    max_length: int,
+) -> nn.Module:
+    if encoding_type == "sinusoidal":
+        return SinusoidalPositionalEncoding(d_model=d_model, max_length=max_length)
+    if encoding_type == "learned":
+        return LearnedPositionalEncoding(d_model=d_model, max_length=max_length)
+    if encoding_type == "alibi":
+        return ZeroPositionalEncoding(d_model=d_model)
+    raise ValueError(f"Unsupported positional encoding type {encoding_type!r}.")
+
+
+def _get_alibi_slopes(num_heads: int, *, device: torch.device | str) -> Tensor:
+    return torch.tensor(
+        [2 ** (-(8.0 * (head_index + 1) / num_heads)) for head_index in range(num_heads)],
+        dtype=torch.float32,
+        device=device,
+    )
+
+
+def build_alibi_causal_mask(
+    *,
+    sequence_length: int,
+    num_heads: int,
+    batch_size: int,
+    device: torch.device | str,
+) -> Tensor:
+    positions = torch.arange(sequence_length, device=device, dtype=torch.float32)
+    distance = positions[:, None] - positions[None, :]
+    future = distance < 0
+    distance = distance.clamp_min(0.0)
+    slopes = _get_alibi_slopes(num_heads, device=device).view(num_heads, 1, 1)
+    bias = -slopes * distance
+    bias = bias.masked_fill(future.unsqueeze(0), float("-inf"))
+    return bias.repeat_interleave(batch_size, dim=0)
+
+
 def build_causal_mask(sequence_length: int, device: torch.device | str) -> Tensor:
     return torch.triu(
         torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=device),
@@ -43,6 +110,18 @@ def get_activation(name: str) -> Callable[[Tensor], Tensor]:
     if name == "gelu":
         return torch.nn.functional.gelu
     raise ValueError(f"Unsupported activation {name!r}.")
+
+
+def normalize_key_padding_mask(
+    key_padding_mask: Tensor | None,
+    *,
+    attn_mask: Tensor,
+) -> Tensor | None:
+    if key_padding_mask is None:
+        return None
+    if attn_mask.dtype == torch.bool:
+        return key_padding_mask
+    return key_padding_mask.to(dtype=attn_mask.dtype).masked_fill(key_padding_mask, float("-inf"))
 
 
 class TransformerDecoderLayer(nn.Module):
@@ -96,7 +175,10 @@ class TransformerDecoderLayer(nn.Module):
             x,
             x,
             attn_mask=tgt_causal_mask,
-            key_padding_mask=tgt_padding_mask,
+            key_padding_mask=normalize_key_padding_mask(
+                tgt_padding_mask,
+                attn_mask=tgt_causal_mask,
+            ),
             need_weights=False,
         )[0]
         x = self.norm1(x + self.dropout1(self_attn_output))
@@ -106,7 +188,10 @@ class TransformerDecoderLayer(nn.Module):
                 x,
                 memory,
                 memory,
-                key_padding_mask=memory_padding_mask,
+                key_padding_mask=normalize_key_padding_mask(
+                    memory_padding_mask,
+                    attn_mask=tgt_causal_mask,
+                ),
                 need_weights=False,
             )[0]
             x = self.norm2(x + self.dropout2(cross_attn_output))

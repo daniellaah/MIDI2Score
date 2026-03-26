@@ -24,6 +24,37 @@ Last updated: 2026-03-26
   - `input_tokens = tokens[:, :-1]`
   - `output_tokens = tokens[:, 1:]`
 
+### Pipeline
+
+```mermaid
+flowchart TD
+    A["Raw score assets in PDMX preprocessing output"] --> B["Linearized MusicXML (.lmx)"]
+    B --> C["BPE tokenizer: tokenizer_rd.json"]
+    C --> D["HuggingFace dataset row: input_ids"]
+    D --> E["Dataset access"]
+    E --> F["Training split: random contiguous crop if length > 1024"]
+    E --> G["Validation / test: prefix crop if length > 1024"]
+    F --> H["Dynamic padding inside each batch"]
+    G --> H
+    H --> I["Batch tensor: tokens (B, T)"]
+    I --> J["Language-model shift"]
+    J --> K["input_tokens = tokens[:, :-1]"]
+    J --> L["output_tokens = tokens[:, 1:]"]
+    K --> M["Decoder-only Transformer LM"]
+    M --> N["Logits: (B, T-1, vocab_size)"]
+    N --> O["Cross-entropy loss with PAD ignored"]
+    L --> O
+```
+
+### Tensor Shapes
+
+- raw sample: one `input_ids` list
+- after crop: up to `1024` tokens
+- after dynamic padding: `tokens` with shape `(batch_size, seq_len)`
+- model input: `input_tokens` with shape `(batch_size, seq_len - 1)`
+- target labels: `output_tokens` with shape `(batch_size, seq_len - 1)`
+- model output: `logits` with shape `(batch_size, seq_len - 1, 5000)`
+
 ### Decoder
 
 - model type: decoder-only Transformer language model
@@ -34,6 +65,38 @@ Last updated: 2026-03-26
 - `dim_feedforward = 1024`
 - `dropout = 0.0`
 - positional encoding: sinusoidal
+
+### Model Graph
+
+```mermaid
+flowchart TD
+    A["input_tokens (B, T)"] --> B["Token embedding"]
+    B --> C["Scale by sqrt(d_model)"]
+    C --> D["Sinusoidal positional encoding"]
+    D --> E["Embedding dropout"]
+    E --> F["Decoder layer 1"]
+    F --> G["Decoder layer 2"]
+    G --> H["Final layer norm"]
+    H --> I["Linear projection to vocab"]
+    I --> J["logits (B, T, 5000)"]
+
+    subgraph L1["One decoder layer"]
+        K["Masked self-attention"] --> L["Residual + layer norm"]
+        L --> M["Feed-forward: Linear -> Activation -> Dropout -> Linear"]
+        M --> N["Residual + layer norm"]
+    end
+```
+
+### Decoder Layer Details
+
+- each layer uses masked self-attention only during decoder pretraining
+- causal mask prevents token `t` from attending to future positions
+- there are `2` decoder layers
+- each layer contains:
+  - multi-head self-attention with `4` heads
+  - feed-forward block `256 -> 1024 -> 256`
+  - residual connections and layer norms
+- cross-attention code exists for later seq2seq fine-tuning, but it is not used in decoder pretraining
 
 ### Training
 
@@ -95,3 +158,11 @@ Last updated: 2026-03-26
 - verification lives in `tests/test_decoder_pretraining.py`
 - `dropout = 0.05` was clearly worse in smoke testing: best validation loss `3.7221`
 - likely explanation: this setup is already regularized by random crop and early stopping, while dropout is applied at embedding, attention, FFN, and residual paths, so added noise hurts optimization more than it helps generalization
+
+### Positional Encoding
+
+- current recommendation keeps `position_encoding_type = sinusoidal`
+- `300s` smoke comparison on the current best `rd` branch:
+  - sinusoidal: best validation loss `2.2893`
+  - learned absolute positional embedding: best validation loss `3.5420`
+- conclusion: learned absolute position embeddings were clearly worse in the current setup, so they were not promoted to a long-budget run

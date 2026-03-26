@@ -6,7 +6,8 @@ from torch import Tensor, nn
 
 from midi2score.models.decoder_config import DecoderLanguageModelConfig
 from midi2score.models.modules import (
-    SinusoidalPositionalEncoding,
+    build_alibi_causal_mask,
+    build_positional_encoding,
     TransformerDecoderStack,
     build_causal_mask,
 )
@@ -22,7 +23,8 @@ class TransformerDecoderLM(nn.Module):
             embedding_dim=config.d_model,
             padding_idx=config.pad_token_id,
         )
-        self.position_encoding = SinusoidalPositionalEncoding(
+        self.position_encoding = build_positional_encoding(
+            encoding_type=config.position_encoding_type,
             d_model=config.d_model,
             max_length=config.max_length,
         )
@@ -57,7 +59,15 @@ class TransformerDecoderLM(nn.Module):
         padding_mask: Tensor | None = None,
     ) -> Tensor:
         decoded_inputs = self.decode(input_tokens)
-        causal_mask = build_causal_mask(input_tokens.size(1), device=input_tokens.device)
+        if self.config.position_encoding_type == "alibi":
+            causal_mask = build_alibi_causal_mask(
+                sequence_length=input_tokens.size(1),
+                num_heads=self.config.nhead,
+                batch_size=input_tokens.size(0),
+                device=input_tokens.device,
+            )
+        else:
+            causal_mask = build_causal_mask(input_tokens.size(1), device=input_tokens.device)
         hidden_states = self.decoder(
             decoded_inputs,
             tgt_causal_mask=causal_mask,

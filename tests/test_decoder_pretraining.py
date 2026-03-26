@@ -157,6 +157,44 @@ def test_decoder_language_model_forward_produces_vocab_logits() -> None:
     )
 
 
+def test_decoder_language_model_supports_learned_positional_encoding() -> None:
+    model_config, batch = build_small_real_batch()
+    model_config = DecoderLanguageModelConfig(
+        **{
+            **model_config.to_dict(),
+            "position_encoding_type": "learned",
+        }
+    )
+    model = TransformerDecoderLM(model_config)
+
+    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+
+    assert logits.shape == (
+        batch.input_tokens.size(0),
+        batch.input_tokens.size(1),
+        model_config.vocab_size,
+    )
+
+
+def test_decoder_language_model_supports_alibi_positional_bias() -> None:
+    model_config, batch = build_small_real_batch()
+    model_config = DecoderLanguageModelConfig(
+        **{
+            **model_config.to_dict(),
+            "position_encoding_type": "alibi",
+        }
+    )
+    model = TransformerDecoderLM(model_config)
+
+    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+
+    assert logits.shape == (
+        batch.input_tokens.size(0),
+        batch.input_tokens.size(1),
+        model_config.vocab_size,
+    )
+
+
 def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "decoder.pt"
     best_checkpoint_path = tmp_path / "decoder-best.pt"

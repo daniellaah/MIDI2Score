@@ -1785,6 +1785,11 @@ Key results:
   - change: long-budget validation for `linear` warmup/decay on the strongest branch
   - result: best validation loss `1.8039`
   - conclusion: useful
+- `EXP-RD-POSENC-001_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_learned_smoke`
+  - change: replace sinusoidal positional encoding with learned absolute position embeddings
+  - result: best validation loss `3.5420`
+  - reference smoke baseline on the same branch: `2.2893` with sinusoidal
+  - conclusion: worse
 - `EXP-RD-LONGCTX-021_crop1024_bucket_dmodel256_ff1024_lr6e4_dropout005_bs8_smoke`
   - change: set `dropout = 0.05`
   - result: best validation loss `3.7221`
@@ -1833,6 +1838,7 @@ Current recommended rd model:
 - `num_layers=2`
 - `dim_feedforward=1024`
 - `dropout=0.0`
+- `position_encoding_type=sinusoidal`
 - `batch_size=8`
 - `learning_rate=6e-4`
 - `scheduler=linear`
