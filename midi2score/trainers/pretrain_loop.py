@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
+from torch.optim.lr_scheduler import LambdaLR
 
 from midi2score.data import LanguageModelDataConfig, build_language_model_dataloader
 from midi2score.models import DecoderLanguageModelConfig, TransformerDecoderLM
@@ -53,6 +54,7 @@ def run_decoder_pretraining_loop(
     )
     model = TransformerDecoderLM(model_config).to(device)
     optimizer = Adam(model.parameters(), lr=training_config.learning_rate)
+    scheduler = build_lr_scheduler(optimizer, training_config)
     logger = TrainingLogger(
         csv_path=training_config.csv_log_path,
         tensorboard_log_dir=training_config.tensorboard_log_dir,
@@ -65,19 +67,23 @@ def run_decoder_pretraining_loop(
     best_step = start_step
     consecutive_non_improving_evals = 0
     optimizer_state_loaded = False
+    scheduler_state_loaded = False
     if training_config.resume_checkpoint_path is not None:
         resume_state = load_checkpoint_for_resume(
             training_config.resume_checkpoint_path,
             model=model,
             optimizer=optimizer,
+            scheduler=scheduler,
         )
         start_step = resume_state.start_step
         best_validation_loss = resume_state.best_validation_loss
         best_step = start_step
         optimizer_state_loaded = resume_state.optimizer_loaded
+        scheduler_state_loaded = resume_state.scheduler_loaded
         print(
             f"resumed_from={training_config.resume_checkpoint_path} "
-            f"start_step={start_step} optimizer_state_loaded={optimizer_state_loaded}"
+            f"start_step={start_step} optimizer_state_loaded={optimizer_state_loaded} "
+            f"scheduler_state_loaded={scheduler_state_loaded}"
         )
     data_iterator = iter(train_loader)
     loop_started_at = time.monotonic()
@@ -112,6 +118,8 @@ def run_decoder_pretraining_loop(
             )
             loss.backward()
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
 
             loss_value = float(loss.detach().item())
             losses.append(loss_value)
@@ -152,6 +160,7 @@ def run_decoder_pretraining_loop(
                             "training_config": training_config.to_dict(),
                             "model_state": model.state_dict(),
                             "optimizer_state": optimizer.state_dict(),
+                            "scheduler_state": None if scheduler is None else scheduler.state_dict(),
                             "step": step,
                             "validation_loss": validation_loss,
                             "best_validation_loss": best_validation_loss,
@@ -192,6 +201,7 @@ def run_decoder_pretraining_loop(
                 "training_config": training_config.to_dict(),
                 "model_state": model.state_dict(),
                 "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": None if scheduler is None else scheduler.state_dict(),
                 "step": final_step,
                 "validation_loss": best_validation_loss,
                 "best_validation_loss": best_validation_loss,
@@ -247,6 +257,37 @@ def evaluate_decoder_language_model(
     if total_batches == 0:
         raise ValueError("Validation loader produced zero batches.")
     return total_loss / total_batches
+
+
+def build_lr_scheduler(optimizer: Adam, training_config: TrainingConfig) -> LambdaLR | None:
+    if training_config.scheduler == "none" and training_config.warmup_steps == 0:
+        return None
+
+    total_steps = training_config.num_steps
+    warmup_steps = training_config.warmup_steps
+    min_lr_ratio = training_config.min_lr_ratio
+    scheduler_name = training_config.scheduler
+
+    def lr_lambda(step: int) -> float:
+        # LambdaLR counts the first scheduler.step() as step=1 in practice.
+        current_step = max(step, 1)
+        if warmup_steps > 0 and current_step <= warmup_steps:
+            return current_step / warmup_steps
+
+        if scheduler_name == "none":
+            return 1.0
+
+        decay_start = max(warmup_steps, 1)
+        decay_steps = max(total_steps - decay_start, 1)
+        progress = min(max((current_step - decay_start) / decay_steps, 0.0), 1.0)
+        if scheduler_name == "linear":
+            return 1.0 - progress * (1.0 - min_lr_ratio)
+        if scheduler_name == "cosine":
+            cosine = 0.5 * (1.0 + torch.cos(torch.tensor(progress * torch.pi))).item()
+            return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
+        raise ValueError(f"Unsupported scheduler {scheduler_name!r}.")
+
+    return LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
 def _validate_pretraining_setup(

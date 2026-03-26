@@ -37,6 +37,21 @@ def test_training_config_rejects_non_positive_time_budget() -> None:
         TrainingConfig(max_duration_seconds=0.0)
 
 
+def test_training_config_rejects_unknown_scheduler() -> None:
+    with pytest.raises(ValueError, match="Unsupported scheduler"):
+        TrainingConfig(scheduler="triangle")
+
+
+def test_training_config_rejects_negative_warmup_steps() -> None:
+    with pytest.raises(ValueError, match="warmup_steps"):
+        TrainingConfig(warmup_steps=-1)
+
+
+def test_training_config_rejects_invalid_min_lr_ratio() -> None:
+    with pytest.raises(ValueError, match="min_lr_ratio"):
+        TrainingConfig(min_lr_ratio=1.5)
+
+
 def test_training_config_rejects_non_positive_early_stopping_patience() -> None:
     with pytest.raises(ValueError, match="early_stopping_patience"):
         TrainingConfig(early_stopping_patience=0, eval_every=1)

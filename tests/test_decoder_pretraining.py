@@ -21,6 +21,7 @@ from midi2score.trainers import (
     evaluate_decoder_language_model,
     run_decoder_pretraining_loop,
 )
+from midi2score.trainers.pretrain_loop import build_lr_scheduler
 
 
 def build_small_real_batch() -> tuple[DecoderLanguageModelConfig, object]:
@@ -224,6 +225,31 @@ def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
     assert loss > 0.0
 
 
+def test_decoder_dropout_is_active_only_in_train_mode() -> None:
+    torch.manual_seed(0)
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=128,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        dropout=0.5,
+        max_length=16,
+    )
+    model = TransformerDecoderLM(model_config)
+    input_tokens = torch.randint(0, model_config.vocab_size, (2, 8))
+
+    model.train()
+    train_first = model(input_tokens)
+    train_second = model(input_tokens)
+    assert not torch.allclose(train_first, train_second)
+
+    model.eval()
+    eval_first = model(input_tokens)
+    eval_second = model(input_tokens)
+    assert torch.allclose(eval_first, eval_second)
+
+
 def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "decoder.pt"
     csv_log_path = tmp_path / "resume.csv"
@@ -273,6 +299,79 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
         rows = list(csv.reader(handle))
     logged_steps = [int(row[0]) for row in rows[1:] if row[1] == "train"]
     assert logged_steps == [3, 4]
+
+
+def test_build_lr_scheduler_creates_warmup_linear_schedule() -> None:
+    parameter = torch.nn.Parameter(torch.ones(1))
+    optimizer = torch.optim.Adam([parameter], lr=1.0)
+    training_config = TrainingConfig(
+        num_steps=10,
+        scheduler="linear",
+        warmup_steps=2,
+        min_lr_ratio=0.2,
+    )
+
+    scheduler = build_lr_scheduler(optimizer, training_config)
+
+    assert scheduler is not None
+    observed_lrs = []
+    for _ in range(4):
+        optimizer.step()
+        scheduler.step()
+        observed_lrs.append(optimizer.param_groups[0]["lr"])
+
+    assert observed_lrs[0] == pytest.approx(0.5)
+    assert observed_lrs[1] == pytest.approx(1.0)
+    assert observed_lrs[2] < observed_lrs[1]
+    assert observed_lrs[-1] >= 0.2
+
+
+def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "scheduler-resume.pt"
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=5000,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        max_length=64,
+    )
+    data_config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=64,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+    )
+
+    first_stage = TrainingConfig(
+        batch_size=4,
+        num_steps=2,
+        log_every=10,
+        eval_every=0,
+        scheduler="linear",
+        warmup_steps=1,
+        min_lr_ratio=0.5,
+        device="cpu",
+        save_checkpoint_path=str(checkpoint_path),
+    )
+    run_decoder_pretraining_loop(model_config, data_config, first_stage)
+
+    second_stage = TrainingConfig(
+        batch_size=4,
+        num_steps=3,
+        log_every=10,
+        eval_every=0,
+        scheduler="linear",
+        warmup_steps=1,
+        min_lr_ratio=0.5,
+        device="cpu",
+        save_checkpoint_path=str(checkpoint_path),
+        resume_checkpoint_path=str(checkpoint_path),
+    )
+    result = run_decoder_pretraining_loop(model_config, data_config, second_stage)
+
+    assert result.final_step == 3
 
 
 def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -1739,3 +1739,103 @@ Main takeaways:
   - length bucketing
   - larger model capacity
 - after those changes, the long-context branch beat the earlier short-context rd best (`2.0914`)
+
+## 2026-03-26 rd Follow-up
+
+Goal:
+
+- optimize the new `rd` long-context branch more rigorously
+- compare `length_bucketing` vs no bucketing on the same recipe
+- test `batch_size = 16`
+- add and validate warmup / scheduler support
+- check whether dropout is broken or simply unhelpful
+
+Key results:
+
+- `EXP-RD-LONGCTX-027_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_smoke`
+  - change: disable `length_bucketing` on the then-best `rd` branch
+  - result: `300s`, `5136` steps, best validation loss `2.3004`
+  - reference bucketing smoke: `EXP-RD-LONGCTX-013...` at `300s`, `3406` steps, best validation loss `2.7204`
+  - conclusion: useful
+- `EXP-RD-LONGCTX-032_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_long`
+  - change: long-budget follow-up for the no-bucketing branch
+  - result: best validation loss `1.8107`
+  - conclusion: useful
+- `EXP-RD-LONGCTX-028_crop1024_bucket_dmodel256_ff1024_lr6e4_bs16_smoke`
+  - change: `batch_size 8 -> 16` on the older bucketing branch
+  - result: best validation loss `2.5373`
+  - conclusion: useful as a smoke signal
+- `EXP-RD-LONGCTX-029_crop1024_bucket_dmodel256_ff1024_lr6e4_bs16_long`
+  - change: long-budget follow-up for `batch_size = 16`
+  - result: best validation loss `2.0639`
+  - conclusion: worse
+- `EXP-RD-LONGCTX-030_crop1024_bucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_smoke`
+  - change: add `linear` warmup/decay on the bucketing branch
+  - result: best validation loss `2.6237`
+  - conclusion: useful
+- `EXP-RD-LONGCTX-031_crop1024_bucket_dmodel256_ff1024_lr6e4_bs8_cosinewarmup_smoke`
+  - change: add `cosine` warmup/decay on the bucketing branch
+  - result: best validation loss `2.6578`
+  - conclusion: useful, but worse than linear
+- `EXP-RD-LONGCTX-033_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_smoke`
+  - change: move `linear` warmup/decay onto the strongest no-bucketing branch
+  - result: best validation loss `2.2893` vs no-scheduler smoke `2.3004`
+  - conclusion: no clear effect at smoke budget, but directionally positive
+- `EXP-RD-LONGCTX-034_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long`
+  - change: long-budget validation for `linear` warmup/decay on the strongest branch
+  - result: best validation loss `1.8039`
+  - conclusion: useful
+- `EXP-RD-LONGCTX-021_crop1024_bucket_dmodel256_ff1024_lr6e4_dropout005_bs8_smoke`
+  - change: set `dropout = 0.05`
+  - result: best validation loss `3.7221`
+  - conclusion: worse
+
+Efficiency notes for `length_bucketing`:
+
+- batch-shape benchmark on the same `rd` recipe over the first `512` train batches:
+  - no bucketing:
+    - average padded input length `950.26`
+    - average non-pad tokens per batch `3654.66`
+    - average padding fraction `51.87%`
+  - bucketing:
+    - average padded input length `464.38`
+    - average non-pad tokens per batch `3651.72`
+    - average padding fraction `2.40%`
+- dataloader-only benchmark over `1024` batches:
+  - no bucketing:
+    - `1483.85` batches/s
+    - `5.38M` non-pad tokens/s
+  - bucketing:
+    - `1543.99` batches/s
+    - `5.43M` non-pad tokens/s
+- interpretation:
+  - bucketing is working as intended at the data-loader level
+  - the regression appears in end-to-end MPS training, not in Python-side loading
+
+Dropout investigation:
+
+- code inspection found no obvious dropout bug
+- dropout is applied at:
+  - embedding output in `TransformerDecoderLM.decode`
+  - attention modules
+  - FFN hidden activations
+  - residual branches in `TransformerDecoderLayer`
+- training loop uses `model.train()` for train steps and `model.eval()` for validation
+- `tests/test_decoder_pretraining.py` now includes a direct test that dropout changes outputs in train mode and becomes deterministic in eval mode
+
+Current recommended rd model:
+
+- dataset: `data/huggingface`
+- tokenizer: `data/tokenizer_rd.json`
+- `max_length=1024`
+- `length_bucketing=false`
+- `d_model=256`
+- `num_layers=2`
+- `dim_feedforward=1024`
+- `dropout=0.0`
+- `batch_size=8`
+- `learning_rate=6e-4`
+- `scheduler=linear`
+- `warmup_steps=500`
+- `min_lr_ratio=0.1`
+- best validation loss: `1.8039`
