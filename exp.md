@@ -1858,3 +1858,48 @@ Current recommended rd model:
 - `warmup_steps=500`
 - `min_lr_ratio=0.1`
 - best validation loss: `1.8039`
+
+## 2026-03-27 full Update Based on rd Best
+
+Goal:
+
+- transfer the `rd`-validated training recipe to the current `full` best branch
+- test whether `linear` warmup, lower learning rate, and larger width also help on `full`
+
+Key results:
+
+- `EXP-FULL-RDREF-001_sliding160_dmodel128_ff1024_lr6e4_linearwarmup_bs8_smoke`
+  - change: keep the old full short-context structure, but switch to `learning_rate=6e-4` with `linear` warmup
+  - result: best validation loss `2.4881` vs old `300s` baseline `2.5364`
+  - conclusion: useful
+- `EXP-FULL-RDREF-002_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_smoke`
+  - change: add `d_model=256` on top of the rd-style optimizer schedule
+  - result: best validation loss `2.3922`
+  - conclusion: useful
+- `EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long`
+  - change: long-budget follow-up for the strongest smoke candidate
+  - result: best validation loss `2.1019`
+  - conclusion: useful
+
+Current recommended full model:
+
+- dataset: `data/huggingface_full`
+- tokenizer: `data/tokenizer_full.json`
+- `max_length=256`
+- `sliding_window_stride=160`
+- `d_model=256`
+- `num_layers=2`
+- `dim_feedforward=1024`
+- `dropout=0.0`
+- `batch_size=8`
+- `learning_rate=6e-4`
+- `scheduler=linear`
+- `warmup_steps=500`
+- `min_lr_ratio=0.1`
+- best validation loss: `2.1019`
+
+Main takeaway:
+
+- the `rd`-validated optimizer schedule transferred cleanly to `full`
+- on `full`, the biggest win came from combining that schedule with `d_model=256` on the existing short-context sliding-window branch
+- this new short-context full model beats the previous best `2.2531` and also remains clearly better than the best tested `1024 + bucketing` backup branch (`2.4013`)

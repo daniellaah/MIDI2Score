@@ -1,6 +1,6 @@
 # Decoder Pretraining on `huggingface_full`
 
-Last updated: 2026-03-25
+Last updated: 2026-03-27
 
 ## Recommended Full-Data Run
 
@@ -16,12 +16,13 @@ Last updated: 2026-03-25
 
 - model type: decoder-only Transformer language model
 - vocab size: `5000`
-- `d_model = 128`
+- `d_model = 256`
 - `nhead = 4`
 - `num_layers = 2`
 - `dim_feedforward = 1024`
 - `dropout = 0.0`
 - `max_length = 256`
+- positional encoding: sinusoidal
 
 ### Training
 
@@ -29,7 +30,10 @@ Last updated: 2026-03-25
 - objective: next-token prediction
 - model-selection metric: validation cross-entropy loss
 - `batch_size = 8`
-- `learning_rate = 8e-4`
+- `learning_rate = 6e-4`
+- scheduler: `linear`
+- `warmup_steps = 500`
+- `min_lr_ratio = 0.1`
 - data loading: sliding window
 - `sliding_window_stride = 160`
 - `eval_every = 500`
@@ -40,11 +44,11 @@ Last updated: 2026-03-25
 
 ### Final Result
 
-- best validation loss: `2.253071304410696`
-- final step: `211000`
-- elapsed seconds: `2346.28`
-- best checkpoint: `artifacts/research/EXP-FULL-FINAL-007_stride160_dmodel128_ff1024_dropout0_lr8e4_bs8_es20/best.pt`
-- latest checkpoint: `artifacts/research/EXP-FULL-FINAL-007_stride160_dmodel128_ff1024_dropout0_lr8e4_bs8_es20/latest.pt`
+- best validation loss: `2.101936012506485`
+- final step: `223000`
+- elapsed seconds: `2293.68`
+- best checkpoint: `artifacts/research/EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long/best.pt`
+- latest checkpoint: `artifacts/research/EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long/latest.pt`
 
 ## Long-Context Backup Result
 
@@ -53,6 +57,7 @@ Last updated: 2026-03-25
   - `d_model = 256`
   - `dim_feedforward = 1024`
   - `batch_size = 8`
+  - `learning_rate = 8e-4`
   - best validation loss: `2.401298375800252`
   - best checkpoint: `artifacts/research/EXP-FULL-LONGCTX-007_crop1024_bucket_dmodel256_ff1024_bs8_long/best.pt`
 
@@ -64,4 +69,4 @@ Interpretation:
 ## Note
 
 - this is the current recommended result on `huggingface_full`
-- compared with the random-crop full baseline (`2.4494`), sliding window plus targeted tuning improved validation loss to `2.2531`
+- compared with the earlier recommended full run (`2.2531`), transferring the `rd`-validated training recipe and increasing `d_model` improved validation loss to `2.1019`
