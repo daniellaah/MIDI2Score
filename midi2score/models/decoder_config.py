@@ -8,7 +8,6 @@ from midi2score.models.config import ModelConfig
 @dataclass(slots=True)
 class DecoderLanguageModelConfig:
     vocab_size: int
-    model_type: str = "standard"
     d_model: int = 256
     nhead: int = 8
     num_layers: int = 4
@@ -16,10 +15,6 @@ class DecoderLanguageModelConfig:
     dropout: float = 0.1
     activation: str = "relu"
     position_encoding_type: str = "sinusoidal"
-    attention_window_size: int = 256
-    attention_block_size: int = 256
-    attention_lookback_blocks: int = 1
-    attention_landmark_stride: int = 256
     pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
@@ -39,22 +34,12 @@ class DecoderLanguageModelConfig:
             "nhead": self.nhead,
             "num_layers": self.num_layers,
             "dim_feedforward": self.dim_feedforward,
-            "attention_window_size": self.attention_window_size,
-            "attention_block_size": self.attention_block_size,
-            "attention_lookback_blocks": self.attention_lookback_blocks,
-            "attention_landmark_stride": self.attention_landmark_stride,
             "max_length": self.max_length,
         }
         for field_name, value in positive_int_fields.items():
             if value <= 0:
                 raise ValueError(f"{field_name} must be positive, got {value}.")
 
-        if self.model_type not in {"standard", "local_window", "block_local", "landmark"}:
-            raise ValueError(
-                "model_type must be one of "
-                f"{{'standard', 'local_window', 'block_local', 'landmark'}}, "
-                f"got {self.model_type!r}."
-            )
         if self.d_model % self.nhead != 0:
             raise ValueError(
                 f"d_model ({self.d_model}) must be divisible by nhead ({self.nhead})."

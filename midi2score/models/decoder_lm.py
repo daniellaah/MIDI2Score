@@ -1,24 +1,76 @@
 from __future__ import annotations
 
-from torch import Tensor
+import math
+
+from torch import Tensor, nn
 
 from midi2score.models.decoder_config import DecoderLanguageModelConfig
-from midi2score.models.decoder_lm_common import BaseDecoderLanguageModel
-from midi2score.models.modules import build_alibi_causal_mask, build_causal_mask
+from midi2score.models.modules import (
+    build_alibi_causal_mask,
+    build_positional_encoding,
+    TransformerDecoderStack,
+    build_causal_mask,
+)
 
 
-class TransformerDecoderLM(BaseDecoderLanguageModel):
-    """Baseline decoder-only Transformer with full causal self-attention."""
-
+class TransformerDecoderLM(nn.Module):
     def __init__(self, config: DecoderLanguageModelConfig) -> None:
-        super().__init__(config)
+        super().__init__()
+        self.config = config
 
-    def build_attention_mask(self, input_tokens: Tensor) -> Tensor:
+        self.tgt_embedding = nn.Embedding(
+            num_embeddings=config.vocab_size,
+            embedding_dim=config.d_model,
+            padding_idx=config.pad_token_id,
+        )
+        self.position_encoding = build_positional_encoding(
+            encoding_type=config.position_encoding_type,
+            d_model=config.d_model,
+            max_length=config.max_length,
+        )
+        self.dropout = nn.Dropout(config.dropout)
+        self.decoder = TransformerDecoderStack(
+            d_model=config.d_model,
+            nhead=config.nhead,
+            num_layers=config.num_layers,
+            dim_feedforward=config.dim_feedforward,
+            dropout=config.dropout,
+            activation=config.activation,
+        )
+        self.output_projection = nn.Linear(config.d_model, config.vocab_size)
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        for parameter in self.parameters():
+            if parameter.dim() > 1:
+                nn.init.xavier_uniform_(parameter)
+
+    def decode(self, input_tokens: Tensor) -> Tensor:
+        return self.dropout(
+            self.tgt_embedding(input_tokens) * math.sqrt(self.config.d_model)
+            + self.position_encoding(input_tokens)
+        )
+
+    def forward(
+        self,
+        input_tokens: Tensor,
+        *,
+        padding_mask: Tensor | None = None,
+    ) -> Tensor:
+        decoded_inputs = self.decode(input_tokens)
         if self.config.position_encoding_type == "alibi":
-            return build_alibi_causal_mask(
+            causal_mask = build_alibi_causal_mask(
                 sequence_length=input_tokens.size(1),
                 num_heads=self.config.nhead,
                 batch_size=input_tokens.size(0),
                 device=input_tokens.device,
             )
-        return build_causal_mask(input_tokens.size(1), device=input_tokens.device)
+        else:
+            causal_mask = build_causal_mask(input_tokens.size(1), device=input_tokens.device)
+        hidden_states = self.decoder(
+            decoded_inputs,
+            tgt_causal_mask=causal_mask,
+            tgt_padding_mask=padding_mask,
+        )
+        return self.output_projection(hidden_states)

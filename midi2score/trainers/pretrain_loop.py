@@ -6,12 +6,11 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from torch import nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import LambdaLR
 
 from midi2score.data import LanguageModelDataConfig, build_language_model_dataloader
-from midi2score.models import DecoderLanguageModelConfig, build_decoder_language_model
+from midi2score.models import DecoderLanguageModelConfig, TransformerDecoderLM
 from midi2score.trainers.checkpoint import save_checkpoint
 from midi2score.trainers.config import TrainingConfig
 from midi2score.trainers.device import resolve_device
@@ -53,7 +52,7 @@ def run_decoder_pretraining_loop(
             batch_size=training_config.batch_size,
             shuffle=False,
     )
-    model = build_decoder_language_model(model_config).to(device)
+    model = TransformerDecoderLM(model_config).to(device)
     optimizer = Adam(model.parameters(), lr=training_config.learning_rate)
     scheduler = build_lr_scheduler(optimizer, training_config)
     logger = TrainingLogger(
@@ -229,7 +228,7 @@ def run_decoder_pretraining_loop(
 
 
 def evaluate_decoder_language_model(
-    model: nn.Module,
+    model: TransformerDecoderLM,
     loader,
     *,
     pad_token_id: int,

@@ -11,14 +11,10 @@ from midi2score.data import (
 )
 from midi2score.data.language_model_dataset import LengthBucketBatchSampler
 from midi2score.models import (
-    BlockLocalDecoderLM,
     DecoderLanguageModelConfig,
-    LandmarkDecoderLM,
-    LocalWindowDecoderLM,
     ModelConfig,
     TransformerDecoderLM,
     TransformerSeq2Seq,
-    build_decoder_language_model,
 )
 from midi2score.trainers import (
     TrainingConfig,
@@ -197,80 +193,6 @@ def test_decoder_language_model_supports_alibi_positional_bias() -> None:
         batch.input_tokens.size(1),
         model_config.vocab_size,
     )
-
-
-def test_local_window_decoder_forward_produces_vocab_logits() -> None:
-    model_config, batch = build_small_real_batch()
-    model_config = DecoderLanguageModelConfig(
-        **{
-            **model_config.to_dict(),
-            "model_type": "local_window",
-            "attention_window_size": 16,
-        }
-    )
-    model = LocalWindowDecoderLM(model_config)
-
-    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-
-    assert logits.shape == (
-        batch.input_tokens.size(0),
-        batch.input_tokens.size(1),
-        model_config.vocab_size,
-    )
-
-
-def test_block_local_decoder_forward_produces_vocab_logits() -> None:
-    model_config, batch = build_small_real_batch()
-    model_config = DecoderLanguageModelConfig(
-        **{
-            **model_config.to_dict(),
-            "model_type": "block_local",
-            "attention_block_size": 16,
-            "attention_lookback_blocks": 1,
-        }
-    )
-    model = BlockLocalDecoderLM(model_config)
-
-    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-
-    assert logits.shape == (
-        batch.input_tokens.size(0),
-        batch.input_tokens.size(1),
-        model_config.vocab_size,
-    )
-
-
-def test_landmark_decoder_forward_produces_vocab_logits() -> None:
-    model_config, batch = build_small_real_batch()
-    model_config = DecoderLanguageModelConfig(
-        **{
-            **model_config.to_dict(),
-            "model_type": "landmark",
-            "attention_window_size": 16,
-            "attention_landmark_stride": 16,
-        }
-    )
-    model = LandmarkDecoderLM(model_config)
-
-    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-
-    assert logits.shape == (
-        batch.input_tokens.size(0),
-        batch.input_tokens.size(1),
-        model_config.vocab_size,
-    )
-
-
-def test_decoder_model_factory_builds_requested_variant() -> None:
-    model_config = DecoderLanguageModelConfig(
-        vocab_size=128,
-        model_type="local_window",
-        attention_window_size=16,
-    )
-
-    model = build_decoder_language_model(model_config)
-
-    assert isinstance(model, LocalWindowDecoderLM)
 
 
 def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:

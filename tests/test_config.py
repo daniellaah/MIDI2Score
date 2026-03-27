@@ -85,11 +85,3 @@ def test_decoder_language_model_config_rejects_unknown_position_encoding() -> No
             vocab_size=128,
             position_encoding_type="rope",
         )
-
-
-def test_decoder_language_model_config_rejects_unknown_model_type() -> None:
-    with pytest.raises(ValueError, match="model_type"):
-        DecoderLanguageModelConfig(
-            vocab_size=128,
-            model_type="ring_attention",
-        )
