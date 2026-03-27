@@ -1925,3 +1925,45 @@ Main takeaway:
 
 - on `full`, the final `rd` long-context recipe transfers better than the earlier bucketing-based `1024` branch
 - however, the recommended full model still remains the `256 + sliding_window_stride=160` branch
+
+## 2026-03-27 full No-Bucketing Optimization
+
+Goal:
+
+- further optimize the `full` `1024 + no bucketing` long-context branch
+- use the current `rd`-style no-bucketing recipe as the base and search for a stronger setting
+
+Key results:
+
+- `EXP-FULL-RDREF-005_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_smoke`
+  - change: establish a `300s` baseline for the no-bucketing branch
+  - result: best validation loss `3.7046`
+  - conclusion: baseline only
+- `EXP-FULL-RDREF-006_crop1024_nobucket_dmodel256_ff1024_lr5e4_bs8_linearwarmup_smoke`
+  - change: lower `learning_rate` to `5e-4`
+  - result: best validation loss `4.0064`
+  - conclusion: worse
+- `EXP-FULL-RDREF-007_crop1024_nobucket_dmodel256_ff1024_lr7e4_bs8_linearwarmup_smoke`
+  - change: raise `learning_rate` to `7e-4`
+  - result: best validation loss `3.9244`
+  - conclusion: worse
+- `EXP-FULL-RDREF-008_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_smoke`
+  - change: raise `batch_size` from `8` to `12`
+  - result: best validation loss `3.5282`
+  - conclusion: useful
+- `EXP-FULL-RDREF-009_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs16_linearwarmup_smoke`
+  - change: raise `batch_size` from `12` to `16`
+  - result: best validation loss `3.5400`
+  - conclusion: slightly worse than `bs=12`
+- `EXP-FULL-RDREF-010_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_long`
+  - change: long-budget follow-up for the strongest smoke candidate
+  - result: best validation loss `2.1344`
+  - comparison:
+    - better than the earlier no-bucketing long-context run at `2.1592`
+    - still slightly worse than the current recommended short-context sliding-window full model at `2.1019`
+  - conclusion: useful as the new strongest no-bucketing branch
+
+Main takeaway:
+
+- for `full` `1024 + no bucketing`, `batch_size=12` improved the branch more than nearby learning-rate changes
+- the strongest no-bucketing full model is now `2.1344`, which narrows the gap to the overall full best `2.1019`

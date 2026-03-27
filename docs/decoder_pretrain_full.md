@@ -57,13 +57,13 @@ Last updated: 2026-03-27
   - `length_bucketing = false`
   - `d_model = 256`
   - `dim_feedforward = 1024`
-  - `batch_size = 8`
+  - `batch_size = 12`
   - `learning_rate = 6e-4`
   - `scheduler = linear`
   - `warmup_steps = 500`
   - `min_lr_ratio = 0.1`
-  - best validation loss: `2.1592171555384994`
-  - best checkpoint: `artifacts/research/EXP-FULL-RDREF-004_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long/best.pt`
+  - best validation loss: `2.1344317700713873`
+  - best checkpoint: `artifacts/research/EXP-FULL-RDREF-010_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_long/best.pt`
 
 - older long-context branch with `length_bucketing = true`:
   - best validation loss: `2.401298375800252`
