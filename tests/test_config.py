@@ -43,6 +43,21 @@ def test_training_config_rejects_unknown_scheduler() -> None:
         TrainingConfig(scheduler="triangle")
 
 
+def test_training_config_rejects_negative_weight_decay() -> None:
+    with pytest.raises(ValueError, match="weight_decay"):
+        TrainingConfig(weight_decay=-0.1)
+
+
+def test_training_config_rejects_non_positive_grad_clip_norm() -> None:
+    with pytest.raises(ValueError, match="grad_clip_norm"):
+        TrainingConfig(grad_clip_norm=0.0)
+
+
+def test_training_config_rejects_invalid_label_smoothing() -> None:
+    with pytest.raises(ValueError, match="label_smoothing"):
+        TrainingConfig(label_smoothing=1.0)
+
+
 def test_training_config_rejects_negative_warmup_steps() -> None:
     with pytest.raises(ValueError, match="warmup_steps"):
         TrainingConfig(warmup_steps=-1)

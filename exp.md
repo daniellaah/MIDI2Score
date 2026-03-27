@@ -1992,3 +1992,81 @@ Main takeaway:
 
 - neither `rd` nor `full` currently benefits from moving the no-bucketing branch from `1024` to `2048`
 - `2048 + no bucketing` should not be promoted to long-budget training on either dataset
+
+## 2026-03-27 full No-Bucketing Optimizer Sweep
+
+Goal:
+
+- improve the `full` `1024 + no bucketing` branch without changing the core model shape
+- test optimizer-side changes before trying more structural changes
+
+Setup:
+
+- branch baseline for fair `300s` comparison:
+  - `EXP-FULL-OPT-001_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_baseline300`
+  - best validation loss `3.4875`
+
+Key results:
+
+- weight decay:
+  - `EXP-FULL-OPT-002_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd001_smoke`
+    - change: `weight_decay = 0.01`
+    - result: `6.3196`
+    - conclusion: much worse
+  - `EXP-FULL-OPT-003_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd1e4_smoke`
+    - change: `weight_decay = 1e-4`
+    - result: `3.3392`
+    - conclusion: useful at smoke scale
+  - `EXP-FULL-OPT-004_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd5e4_smoke`
+    - change: `weight_decay = 5e-4`
+    - result: `3.9411`
+    - conclusion: worse
+  - `EXP-FULL-OPT-005_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd1e3_smoke`
+    - change: `weight_decay = 1e-3`
+    - result: `4.5434`
+    - conclusion: worse
+
+- warmup on top of `weight_decay = 1e-4`:
+  - `EXP-FULL-OPT-006_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup1000_wd1e4_smoke`
+    - change: `warmup_steps = 1000`
+    - result: `3.4328`
+    - conclusion: slightly worse than `warmup_steps = 500`
+  - `EXP-FULL-OPT-007_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup2000_wd1e4_smoke`
+    - change: `warmup_steps = 2000`
+    - result: `4.1119`
+    - conclusion: worse
+
+- gradient clipping on top of `weight_decay = 1e-4`:
+  - `EXP-FULL-OPT-008_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd1e4_clip1_smoke`
+    - change: `grad_clip_norm = 1.0`
+    - result: `3.6370`
+    - conclusion: worse
+  - `EXP-FULL-OPT-009_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd1e4_clip05_smoke`
+    - change: `grad_clip_norm = 0.5`
+    - result: `3.8491`
+    - conclusion: worse
+
+- label smoothing on top of `weight_decay = 1e-4`:
+  - `EXP-FULL-OPT-010_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd1e4_ls005_smoke`
+    - change: `label_smoothing = 0.05`
+    - result: `3.9886`
+    - conclusion: worse
+  - `EXP-FULL-OPT-011_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd1e4_ls01_smoke`
+    - change: `label_smoothing = 0.1`
+    - result: `4.0631`
+    - conclusion: worse
+
+- long-budget follow-up for the only smoke winner:
+  - `EXP-FULL-OPT-012_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_wd1e4_long`
+    - change: promote `weight_decay = 1e-4` to `3600s`
+    - result: `2.2827`
+    - comparison:
+      - worse than the existing branch best `2.1344`
+      - still worse than the recommended full best `2.1019`
+    - conclusion: not promotable
+
+Main takeaway:
+
+- for `full` `1024 + no bucketing`, optimizer-side changes did not produce a stronger final model
+- `weight_decay = 1e-4` gave the only positive smoke signal, but the gain did not survive long-budget training
+- the branch best remains `EXP-FULL-RDREF-010_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_long`

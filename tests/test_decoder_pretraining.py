@@ -217,6 +217,9 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     training_config = TrainingConfig(
         batch_size=4,
         num_steps=2,
+        weight_decay=0.01,
+        grad_clip_norm=1.0,
+        label_smoothing=0.1,
         log_every=10,
         eval_every=1,
         num_eval_batches=1,

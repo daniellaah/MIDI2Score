@@ -8,6 +8,9 @@ from pathlib import Path
 class TrainingConfig:
     batch_size: int = 8
     learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+    grad_clip_norm: float | None = None
+    label_smoothing: float = 0.0
     scheduler: str = "none"
     warmup_steps: int = 0
     min_lr_ratio: float = 0.0
@@ -33,6 +36,17 @@ class TrainingConfig:
             raise ValueError(f"batch_size must be positive, got {self.batch_size}.")
         if self.learning_rate <= 0.0:
             raise ValueError(f"learning_rate must be positive, got {self.learning_rate}.")
+        if self.weight_decay < 0.0:
+            raise ValueError(f"weight_decay must be non-negative, got {self.weight_decay}.")
+        if self.grad_clip_norm is not None and self.grad_clip_norm <= 0.0:
+            raise ValueError(
+                f"grad_clip_norm must be positive when provided, got {self.grad_clip_norm}."
+            )
+        if self.label_smoothing < 0.0 or self.label_smoothing >= 1.0:
+            raise ValueError(
+                "label_smoothing must be in [0.0, 1.0), "
+                f"got {self.label_smoothing}."
+            )
         if self.scheduler not in {"none", "linear", "cosine"}:
             raise ValueError(f"Unsupported scheduler {self.scheduler!r}.")
         if self.warmup_steps < 0:

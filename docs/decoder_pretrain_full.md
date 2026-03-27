@@ -73,6 +73,10 @@ Interpretation:
 
 - the `rd`-style `1024 + no bucketing` recipe transfers better than the earlier `1024 + bucketing` branch
 - but it still does not beat the current recommended `256 + sliding window` run
+- a later optimizer sweep on this branch found:
+  - `weight_decay = 1e-4` improved the `300s` smoke result (`3.3392` vs `3.4875`)
+  - but the long-budget follow-up still finished worse than the branch best (`2.2827` vs `2.1344`)
+  - longer warmup, gradient clipping, and label smoothing all degraded the branch
 
 ## Note
 

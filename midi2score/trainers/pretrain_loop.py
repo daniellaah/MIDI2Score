@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
 from torch.optim import Adam
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -53,7 +54,11 @@ def run_decoder_pretraining_loop(
             shuffle=False,
     )
     model = TransformerDecoderLM(model_config).to(device)
-    optimizer = Adam(model.parameters(), lr=training_config.learning_rate)
+    optimizer = Adam(
+        model.parameters(),
+        lr=training_config.learning_rate,
+        weight_decay=training_config.weight_decay,
+    )
     scheduler = build_lr_scheduler(optimizer, training_config)
     logger = TrainingLogger(
         csv_path=training_config.csv_log_path,
@@ -115,8 +120,11 @@ def run_decoder_pretraining_loop(
                 logits.reshape(-1, logits.size(-1)),
                 batch.output_tokens.reshape(-1),
                 ignore_index=model_config.pad_token_id,
+                label_smoothing=training_config.label_smoothing,
             )
             loss.backward()
+            if training_config.grad_clip_norm is not None:
+                clip_grad_norm_(model.parameters(), max_norm=training_config.grad_clip_norm)
             optimizer.step()
             if scheduler is not None:
                 scheduler.step()
