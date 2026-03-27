@@ -104,6 +104,51 @@ def build_causal_mask(sequence_length: int, device: torch.device | str) -> Tenso
     )
 
 
+def build_local_window_causal_mask(
+    *,
+    sequence_length: int,
+    window_size: int,
+    device: torch.device | str,
+) -> Tensor:
+    positions = torch.arange(sequence_length, device=device)
+    distance = positions[:, None] - positions[None, :]
+    future = distance < 0
+    too_far = distance >= window_size
+    return future | too_far
+
+
+def build_block_local_causal_mask(
+    *,
+    sequence_length: int,
+    block_size: int,
+    lookback_blocks: int,
+    device: torch.device | str,
+) -> Tensor:
+    positions = torch.arange(sequence_length, device=device)
+    distance = positions[:, None] - positions[None, :]
+    future = distance < 0
+    block_index = positions // block_size
+    block_gap = block_index[:, None] - block_index[None, :]
+    too_far = block_gap > lookback_blocks
+    return future | too_far
+
+
+def build_landmark_causal_mask(
+    *,
+    sequence_length: int,
+    window_size: int,
+    landmark_stride: int,
+    device: torch.device | str,
+) -> Tensor:
+    positions = torch.arange(sequence_length, device=device)
+    distance = positions[:, None] - positions[None, :]
+    future = distance < 0
+    local_visible = (distance >= 0) & (distance < window_size)
+    landmark_visible = (positions[None, :] % landmark_stride) == 0
+    visible = local_visible | landmark_visible
+    return future | ~visible
+
+
 def get_activation(name: str) -> Callable[[Tensor], Tensor]:
     if name == "relu":
         return torch.relu
