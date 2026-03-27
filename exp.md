@@ -1903,3 +1903,25 @@ Main takeaway:
 - the `rd`-validated optimizer schedule transferred cleanly to `full`
 - on `full`, the biggest win came from combining that schedule with `d_model=256` on the existing short-context sliding-window branch
 - this new short-context full model beats the previous best `2.2531` and also remains clearly better than the best tested `1024 + bucketing` backup branch (`2.4013`)
+
+## 2026-03-27 full Long-Context Check Without Bucketing
+
+Goal:
+
+- test whether the final `rd` long-context recipe also works on `full`
+- compare `1024 + no bucketing` against the earlier `1024 + bucketing` full run
+
+Key result:
+
+- `EXP-FULL-RDREF-004_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long`
+  - change: run `full` with `max_length=1024`, `length_bucketing=false`, `d_model=256`, `dim_feedforward=1024`, `learning_rate=6e-4`, `linear` warmup
+  - result: best validation loss `2.1592`
+  - comparison:
+    - better than the earlier `1024 + bucketing` full long-context branch at `2.4013`
+    - still worse than the current recommended short-context sliding-window full model at `2.1019`
+  - conclusion: useful as the new long-context backup, but not promotable
+
+Main takeaway:
+
+- on `full`, the final `rd` long-context recipe transfers better than the earlier bucketing-based `1024` branch
+- however, the recommended full model still remains the `256 + sliding_window_stride=160` branch

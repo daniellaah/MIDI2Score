@@ -52,18 +52,26 @@ Last updated: 2026-03-27
 
 ## Long-Context Backup Result
 
-- alternative direction: `max_length = 1024` with random-crop training and `length_bucketing = true`
+- alternative direction: `max_length = 1024` with random-crop training and no sliding window
 - best tested long-context model:
+  - `length_bucketing = false`
   - `d_model = 256`
   - `dim_feedforward = 1024`
   - `batch_size = 8`
-  - `learning_rate = 8e-4`
+  - `learning_rate = 6e-4`
+  - `scheduler = linear`
+  - `warmup_steps = 500`
+  - `min_lr_ratio = 0.1`
+  - best validation loss: `2.1592171555384994`
+  - best checkpoint: `artifacts/research/EXP-FULL-RDREF-004_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long/best.pt`
+
+- older long-context branch with `length_bucketing = true`:
   - best validation loss: `2.401298375800252`
   - best checkpoint: `artifacts/research/EXP-FULL-LONGCTX-007_crop1024_bucket_dmodel256_ff1024_bs8_long/best.pt`
 
 Interpretation:
 
-- `1024 + bucketing` is trainable and improves substantially over the same setup without bucketing
+- the `rd`-style `1024 + no bucketing` recipe transfers better than the earlier `1024 + bucketing` branch
 - but it still does not beat the current recommended `256 + sliding window` run
 
 ## Note
