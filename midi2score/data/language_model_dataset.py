@@ -9,7 +9,7 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict, load_from_disk
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import BatchSampler, DataLoader, Dataset, Sampler, get_worker_info
+from torch.utils.data import BatchSampler, DataLoader, Dataset, get_worker_info
 
 from midi2score.data.config import LanguageModelDataConfig
 

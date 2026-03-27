@@ -1967,3 +1967,28 @@ Main takeaway:
 
 - for `full` `1024 + no bucketing`, `batch_size=12` improved the branch more than nearby learning-rate changes
 - the strongest no-bucketing full model is now `2.1344`, which narrows the gap to the overall full best `2.1019`
+
+## 2026-03-27 2048 No-Bucketing Check
+
+Goal:
+
+- test whether simply extending the current strongest no-bucketing recipes from `1024` to `2048` is worthwhile
+- do this fairly for both `rd` and `full`, using the currently recommended no-bucketing recipes rather than the older baselines
+
+Key results:
+
+- `EXP-RD-LONGCTX-036_crop2048_nobucket_dmodel256_ff1024_dropout0_lr6e4_bs8_linearwarmup_smoke`
+  - change: increase `rd` no-bucketing max length from `1024` to `2048`
+  - result: best validation loss `4.5913`
+  - comparison: much worse than the `rd` `1024 + no bucketing` `300s` baseline at `2.2893`
+  - conclusion: worse
+- `EXP-FULL-RDREF-011_crop2048_nobucket_dmodel256_ff1024_dropout0_lr6e4_bs12_linearwarmup_smoke`
+  - change: increase `full` no-bucketing max length from `1024` to `2048`
+  - result: best validation loss `4.9979`
+  - comparison: much worse than the `full` `1024 + no bucketing` `300s` baseline at `3.5282`
+  - conclusion: worse
+
+Main takeaway:
+
+- neither `rd` nor `full` currently benefits from moving the no-bucketing branch from `1024` to `2048`
+- `2048 + no bucketing` should not be promoted to long-budget training on either dataset
