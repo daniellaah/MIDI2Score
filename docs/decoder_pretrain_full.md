@@ -12,6 +12,18 @@ Last updated: 2026-03-27
 - validation split size: `69,573`
 - test split size: `87,403`
 
+### Input
+
+- one dataset row produces one token sequence
+- `max_length = 256`
+- training: sliding-window chunks with `sliding_window_stride = 160`
+- validation / test: deterministic sliding-window coverage with the same stride
+- training batches do not use length bucketing in the recommended run
+- batch padding: dynamic
+- language-model targets:
+  - `input_tokens = tokens[:, :-1]`
+  - `output_tokens = tokens[:, 1:]`
+
 ### Model
 
 - model type: decoder-only Transformer language model

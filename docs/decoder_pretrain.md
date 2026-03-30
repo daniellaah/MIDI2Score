@@ -1,6 +1,31 @@
 # Decoder Pretraining
 
-Last updated: 2026-03-26
+Last updated: 2026-03-30
+
+## Recommended Run At A Glance
+
+- dataset: `data/huggingface`
+- tokenizer: `data/tokenizer_rd.json`
+- `max_length = 1024`
+- training crop: random contiguous crop
+- validation crop: deterministic prefix crop
+- length bucketing: `false`
+- batch padding: `dynamic`
+- model: decoder-only Transformer LM
+- `d_model = 256`
+- `nhead = 4`
+- `num_layers = 2`
+- `dim_feedforward = 1024`
+- `dropout = 0.0`
+- positional encoding: `sinusoidal`
+- `batch_size = 8`
+- `learning_rate = 6e-4`
+- scheduler: `linear`
+- `warmup_steps = 500`
+- `min_lr_ratio = 0.1`
+- wall-clock cap: `3600` seconds
+- best model-selection loss during training: `1.8039128640666604`
+- full-validation recheck on the saved best checkpoint: `1.9305410517514143`
 
 ## Final Recommended Model
 
@@ -20,6 +45,8 @@ Last updated: 2026-03-26
 - validation / test: deterministic prefix crop for overlength samples
 - training batches do not use length bucketing
 - batch padding: dynamic
+  - each batch is padded only to that batch's longest sample
+  - implementation: `torch.nn.utils.rnn.pad_sequence(...)`
 - language-model targets:
   - `input_tokens = tokens[:, :-1]`
   - `output_tokens = tokens[:, 1:]`
@@ -66,6 +93,21 @@ flowchart TD
 - `dropout = 0.0`
 - positional encoding: sinusoidal
 
+### Implementation Files
+
+- dataset and collate:
+  - [`midi2score/data/language_model_dataset.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/data/language_model_dataset.py)
+- model entrypoint:
+  - [`midi2score/models/decoder_lm.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/models/decoder_lm.py)
+- decoder blocks / positional encodings:
+  - [`midi2score/models/modules.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/models/modules.py)
+- model config:
+  - [`midi2score/models/decoder_config.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/models/decoder_config.py)
+- training loop:
+  - [`midi2score/trainers/pretrain_loop.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/trainers/pretrain_loop.py)
+- training config:
+  - [`midi2score/trainers/config.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/trainers/config.py)
+
 ### Model Graph
 
 ```mermaid
@@ -79,12 +121,15 @@ flowchart TD
     G --> H["Final layer norm"]
     H --> I["Linear projection to vocab"]
     I --> J["logits (B, T, 5000)"]
+```
 
-    subgraph L1["One decoder layer"]
-        K["Masked self-attention"] --> L["Residual + layer norm"]
-        L --> M["Feed-forward: Linear -> Activation -> Dropout -> Linear"]
-        M --> N["Residual + layer norm"]
-    end
+### Decoder Layer Graph
+
+```mermaid
+flowchart LR
+    A["Masked self-attention"] --> B["Residual + layer norm"]
+    B --> C["Feed-forward: Linear -> Activation -> Dropout -> Linear"]
+    C --> D["Residual + layer norm"]
 ```
 
 ### Decoder Layer Details
@@ -118,9 +163,15 @@ flowchart TD
 ### Final Result
 
 - best validation loss: `1.8039128640666604`
+- full-validation recheck on the saved best checkpoint: `1.9305410517514143`
 - best checkpoint: `artifacts/research/EXP-RD-LONGCTX-034_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long/best.pt`
 - latest checkpoint: `artifacts/research/EXP-RD-LONGCTX-034_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long/latest.pt`
 - actual stop condition: time-budget cap at `3600` seconds
+
+Note:
+
+- the lower `1.8039` number is the training-time model-selection metric computed on the configured validation subset (`num_eval_batches = 64`)
+- the `1.9305` number is the later full-validation recheck over the complete validation split
 
 ## Follow-up Conclusions
 
