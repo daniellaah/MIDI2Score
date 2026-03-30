@@ -17,8 +17,10 @@ from midi2score.models import (
     TransformerSeq2Seq,
 )
 from midi2score.trainers import (
+    DecoderEvaluationMetrics,
     TrainingConfig,
     evaluate_decoder_language_model,
+    evaluate_decoder_language_model_metrics,
     run_decoder_pretraining_loop,
 )
 from midi2score.trainers.pretrain_loop import build_lr_scheduler
@@ -238,9 +240,12 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     assert result.best_validation_loss is not None
     with csv_log_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.reader(handle))
-    assert rows[0] == ["step", "split", "loss"]
-    assert any(row[1] == "train" for row in rows[1:])
-    assert any(row[1] == "validation" for row in rows[1:])
+    assert rows[0] == ["step", "split", "metric", "value"]
+    assert any(row[1] == "train" and row[2] == "loss" for row in rows[1:])
+    assert any(row[1] == "validation" and row[2] == "loss" for row in rows[1:])
+    assert any(row[1] == "validation" and row[2] == "perplexity" for row in rows[1:])
+    assert any(row[1] == "validation" and row[2] == "token_accuracy" for row in rows[1:])
+    assert any(row[1] == "validation" and row[2] == "top5_accuracy" for row in rows[1:])
 
 
 def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
@@ -264,6 +269,34 @@ def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
     )
 
     assert loss > 0.0
+
+
+def test_evaluate_decoder_language_model_metrics_returns_expected_fields() -> None:
+    model_config, _ = build_small_real_batch()
+    model = TransformerDecoderLM(model_config)
+    data_config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=64,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+    )
+    loader = build_language_model_dataloader(data_config, batch_size=2, shuffle=False)
+
+    metrics = evaluate_decoder_language_model_metrics(
+        model,
+        loader,
+        pad_token_id=model_config.pad_token_id,
+        device="cpu",
+        num_batches=1,
+    )
+
+    assert metrics.loss > 0.0
+    assert metrics.perplexity >= 1.0
+    assert 0.0 <= metrics.token_accuracy <= 1.0
+    assert 0.0 <= metrics.top5_accuracy <= 1.0
+    assert metrics.top5_accuracy >= metrics.token_accuracy
+    assert metrics.evaluated_tokens > 0
 
 
 def test_decoder_dropout_is_active_only_in_train_mode() -> None:
@@ -488,8 +521,14 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
     validation_losses = iter([5.0, 5.5, 5.6])
 
     monkeypatch.setattr(
-        "midi2score.trainers.pretrain_loop.evaluate_decoder_language_model",
-        lambda *args, **kwargs: next(validation_losses),
+        "midi2score.trainers.pretrain_loop.evaluate_decoder_language_model_metrics",
+        lambda *args, **kwargs: DecoderEvaluationMetrics(
+            loss=next(validation_losses),
+            perplexity=1.0,
+            token_accuracy=0.0,
+            top5_accuracy=0.0,
+            evaluated_tokens=1,
+        ),
     )
 
     result = run_decoder_pretraining_loop(model_config, data_config, training_config)

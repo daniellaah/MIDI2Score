@@ -181,6 +181,10 @@ Additional notes:
 
 - objective: next-token prediction
 - model-selection metric: validation cross-entropy loss
+- additional validation metrics:
+  - perplexity
+  - token accuracy
+  - top-5 accuracy
 - `batch_size = 8`
 - `learning_rate = 6e-4`
 - scheduler: `linear`
@@ -210,6 +214,7 @@ Note:
 - the lower `1.7874` number is the training-time model-selection metric computed on the configured validation subset (`num_eval_batches = 64`)
 - the `1.9169` number is the later full-validation recheck over the complete validation split
 - this best checkpoint came from continuing the prior `3600s` run with optimizer and scheduler state restored
+- training still selects checkpoints by validation cross-entropy; the extra metrics are for diagnosis and comparison
 
 ## Follow-up Conclusions
 

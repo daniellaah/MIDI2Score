@@ -35,6 +35,15 @@ class DecoderPretrainingResult:
     stopped_due_to_early_stopping: bool
 
 
+@dataclass(slots=True)
+class DecoderEvaluationMetrics:
+    loss: float
+    perplexity: float
+    token_accuracy: float
+    top5_accuracy: float
+    evaluated_tokens: int
+
+
 def run_decoder_pretraining_loop(
     model_config: DecoderLanguageModelConfig,
     data_config: LanguageModelDataConfig,
@@ -132,22 +141,47 @@ def run_decoder_pretraining_loop(
             loss_value = float(loss.detach().item())
             losses.append(loss_value)
             final_step = step
-            logger.log_scalar(step=step, split="train", loss=loss_value)
+            logger.log_scalar(step=step, split="train", value=loss_value)
 
             if step % training_config.log_every == 0:
                 print(f"step={step} pretrain_loss={loss_value:.4f} device={device}")
 
             if validation_loader is not None and step % training_config.eval_every == 0:
-                validation_loss = evaluate_decoder_language_model(
+                validation_metrics = evaluate_decoder_language_model_metrics(
                     model,
                     validation_loader,
                     pad_token_id=model_config.pad_token_id,
                     device=device,
                     num_batches=training_config.num_eval_batches,
                 )
+                validation_loss = validation_metrics.loss
                 validation_losses.append((step, validation_loss))
-                logger.log_scalar(step=step, split="validation", loss=validation_loss)
-                print(f"step={step} validation_loss={validation_loss:.4f} device={device}")
+                logger.log_scalar(step=step, split="validation", value=validation_loss)
+                logger.log_scalar(
+                    step=step,
+                    split="validation",
+                    value=validation_metrics.perplexity,
+                    metric="perplexity",
+                )
+                logger.log_scalar(
+                    step=step,
+                    split="validation",
+                    value=validation_metrics.token_accuracy,
+                    metric="token_accuracy",
+                )
+                logger.log_scalar(
+                    step=step,
+                    split="validation",
+                    value=validation_metrics.top5_accuracy,
+                    metric="top5_accuracy",
+                )
+                print(
+                    f"step={step} validation_loss={validation_loss:.4f} "
+                    f"perplexity={validation_metrics.perplexity:.4f} "
+                    f"token_acc={validation_metrics.token_accuracy:.4f} "
+                    f"top5_acc={validation_metrics.top5_accuracy:.4f} "
+                    f"device={device}"
+                )
 
                 improved = best_validation_loss is None or (
                     validation_loss < best_validation_loss - training_config.early_stopping_min_delta
@@ -243,9 +277,29 @@ def evaluate_decoder_language_model(
     device: torch.device | str,
     num_batches: int | None = None,
 ) -> float:
+    return evaluate_decoder_language_model_metrics(
+        model,
+        loader,
+        pad_token_id=pad_token_id,
+        device=device,
+        num_batches=num_batches,
+    ).loss
+
+
+def evaluate_decoder_language_model_metrics(
+    model: TransformerDecoderLM,
+    loader,
+    *,
+    pad_token_id: int,
+    device: torch.device | str,
+    num_batches: int | None = None,
+) -> DecoderEvaluationMetrics:
     model.eval()
     total_loss = 0.0
     total_batches = 0
+    total_valid_tokens = 0
+    total_correct_tokens = 0
+    total_top5_correct_tokens = 0
 
     with torch.no_grad():
         for batch_index, batch in enumerate(loader, start=1):
@@ -259,12 +313,34 @@ def evaluate_decoder_language_model(
             total_loss += float(loss.item())
             total_batches += 1
 
+            flat_targets = batch.output_tokens.reshape(-1)
+            valid_mask = flat_targets.ne(pad_token_id)
+            valid_targets = flat_targets[valid_mask]
+            if valid_targets.numel() > 0:
+                flat_logits = logits.reshape(-1, logits.size(-1))[valid_mask]
+                predictions = flat_logits.argmax(dim=-1)
+                topk = flat_logits.topk(k=min(5, flat_logits.size(-1)), dim=-1).indices
+                total_valid_tokens += int(valid_targets.numel())
+                total_correct_tokens += int(predictions.eq(valid_targets).sum().item())
+                total_top5_correct_tokens += int(
+                    topk.eq(valid_targets.unsqueeze(-1)).any(dim=-1).sum().item()
+                )
+
             if num_batches is not None and batch_index >= num_batches:
                 break
 
     if total_batches == 0:
         raise ValueError("Validation loader produced zero batches.")
-    return total_loss / total_batches
+    average_loss = total_loss / total_batches
+    if total_valid_tokens == 0:
+        raise ValueError("Validation loader produced zero non-padding targets.")
+    return DecoderEvaluationMetrics(
+        loss=average_loss,
+        perplexity=float(torch.exp(torch.tensor(average_loss)).item()),
+        token_accuracy=total_correct_tokens / total_valid_tokens,
+        top5_accuracy=total_top5_correct_tokens / total_valid_tokens,
+        evaluated_tokens=total_valid_tokens,
+    )
 
 
 def build_lr_scheduler(optimizer: Adam, training_config: TrainingConfig) -> LambdaLR | None:

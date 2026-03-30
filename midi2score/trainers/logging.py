@@ -20,21 +20,21 @@ class TrainingLogger:
             if not csv_file.exists():
                 with csv_file.open("w", newline="", encoding="utf-8") as handle:
                     writer = csv.writer(handle)
-                    writer.writerow(["step", "split", "loss"])
+                    writer.writerow(["step", "split", "metric", "value"])
 
         if self.tensorboard_log_dir is not None:
             log_dir = Path(self.tensorboard_log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             self._writer = SummaryWriter(log_dir=str(log_dir))
 
-    def log_scalar(self, *, step: int, split: str, loss: float) -> None:
+    def log_scalar(self, *, step: int, split: str, value: float, metric: str = "loss") -> None:
         if self.csv_path is not None:
             with Path(self.csv_path).open("a", newline="", encoding="utf-8") as handle:
                 writer = csv.writer(handle)
-                writer.writerow([step, split, f"{loss:.8f}"])
+                writer.writerow([step, split, metric, f"{value:.8f}"])
 
         if self._writer is not None:
-            self._writer.add_scalar(f"loss/{split}", loss, global_step=step)
+            self._writer.add_scalar(f"{metric}/{split}", value, global_step=step)
 
     def close(self) -> None:
         if self._writer is not None:
