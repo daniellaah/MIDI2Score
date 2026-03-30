@@ -2070,3 +2070,30 @@ Main takeaway:
 - for `full` `1024 + no bucketing`, optimizer-side changes did not produce a stronger final model
 - `weight_decay = 1e-4` gave the only positive smoke signal, but the gain did not survive long-budget training
 - the branch best remains `EXP-FULL-RDREF-010_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_long`
+
+## 2026-03-30 rd 7200s Resume Check
+
+Goal:
+
+- test whether the current `rd` best branch should keep training beyond the original `3600s` cap
+- do this by resuming from the existing `latest.pt` with optimizer and scheduler state restored
+
+Key result:
+
+- `EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200`
+  - change: resume the current `rd` best run and allow up to `7200s`
+  - resume source: `EXP-RD-LONGCTX-034 ... /latest.pt`
+  - result: best validation loss `1.7874`
+  - comparison:
+    - better than the previous best `1.8039`
+    - full-validation recheck of the new best checkpoint: `1.9169`
+  - stop condition:
+    - did not use the full `7200s`
+    - early stopping triggered after about `1080.6s` of additional training
+  - conclusion: useful and promotable
+
+Main takeaway:
+
+- the original `3600s` run had not fully converged
+- giving the same branch more budget, while keeping the same model and optimizer recipe, produced a real improvement
+- the current recommended `rd` best checkpoint is now `EXP-RD-LONGCTX-037 ... /best.pt`

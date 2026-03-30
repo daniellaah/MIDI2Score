@@ -17,15 +17,16 @@ Last updated: 2026-03-30
 - `num_layers = 2`
 - `dim_feedforward = 1024`
 - `dropout = 0.0`
+- `activation = relu`
 - positional encoding: `sinusoidal`
 - `batch_size = 8`
 - `learning_rate = 6e-4`
 - scheduler: `linear`
 - `warmup_steps = 500`
 - `min_lr_ratio = 0.1`
-- wall-clock cap: `3600` seconds
-- best model-selection loss during training: `1.8039128640666604`
-- full-validation recheck on the saved best checkpoint: `1.9305410517514143`
+- continuation budget: `7200` seconds
+- best model-selection loss during training: `1.7874383879825473`
+- full-validation recheck on the saved best checkpoint: `1.9169188072371013`
 
 ## Final Recommended Model
 
@@ -47,6 +48,10 @@ Last updated: 2026-03-30
 - batch padding: dynamic
   - each batch is padded only to that batch's longest sample
   - implementation: `torch.nn.utils.rnn.pad_sequence(...)`
+- special tokens:
+  - `PAD = 0`
+  - `BOS = 1`
+  - `EOS = 2`
 - language-model targets:
   - `input_tokens = tokens[:, :-1]`
   - `output_tokens = tokens[:, 1:]`
@@ -55,32 +60,45 @@ Last updated: 2026-03-30
 
 ```mermaid
 flowchart TD
-    A["Raw score assets in PDMX preprocessing output"] --> B["Linearized MusicXML (.lmx)"]
-    B --> C["BPE tokenizer: tokenizer_rd.json"]
-    C --> D["HuggingFace dataset row: input_ids"]
-    D --> E["Dataset access"]
-    E --> F["Training split: random contiguous crop if length > 1024"]
-    E --> G["Validation / test: prefix crop if length > 1024"]
-    F --> H["Dynamic padding inside each batch"]
-    G --> H
-    H --> I["Batch tensor: tokens (B, T)"]
-    I --> J["Language-model shift"]
-    J --> K["input_tokens = tokens[:, :-1]"]
-    J --> L["output_tokens = tokens[:, 1:]"]
-    K --> M["Decoder-only Transformer LM"]
-    M --> N["Logits: (B, T-1, vocab_size)"]
-    N --> O["Cross-entropy loss with PAD ignored"]
-    L --> O
+    A["Linearized MusicXML (.lmx)"] --> B["BPE tokenizer (tokenizer_rd.json)"]
+    B --> C["HuggingFace dataset row: input_ids"]
+    C --> D{"split"}
+    D -->|training| E["random contiguous crop if length > 1024"]
+    D -->|validation / test| F["deterministic prefix crop if length > 1024"]
+    E --> G["dynamic padding inside each batch"]
+    F --> G
+    G --> H["tokens (B, T)"]
+    H --> I["LM shift"]
+    I --> J["input_tokens = tokens[:, :-1]"]
+    I --> K["output_tokens = tokens[:, 1:]"]
+    J --> L["decoder-only Transformer LM"]
+    L --> M["logits (B, T-1, 5000)"]
+    K --> N["cross-entropy loss (PAD ignored)"]
+    M --> N
 ```
+
+| Stage | Input | Output | Notes |
+| --- | --- | --- | --- |
+| Preprocessing asset | raw score files | `.lmx` files | upstream preprocessing emits Linearized MusicXML |
+| Tokenization | `.lmx` | `input_ids` | tokenizer: `data/tokenizer_rd.json` |
+| Dataset row | `input_ids` list | one sample | one row corresponds to one token sequence |
+| Length control | one sample | trimmed token sequence | training uses random contiguous crop; validation/test use deterministic prefix crop |
+| Batch collation | list of trimmed sequences | `tokens` with shape `(B, T)` | dynamic padding to the longest sample in the batch |
+| LM shift | `tokens` | `input_tokens`, `output_tokens` | `input_tokens = tokens[:, :-1]`, `output_tokens = tokens[:, 1:]` |
+| Forward pass | `input_tokens` | `logits` | decoder-only Transformer outputs `(B, T-1, vocab_size)` |
+| Loss | `logits`, `output_tokens` | scalar cross-entropy | PAD positions are ignored |
 
 ### Tensor Shapes
 
-- raw sample: one `input_ids` list
-- after crop: up to `1024` tokens
-- after dynamic padding: `tokens` with shape `(batch_size, seq_len)`
-- model input: `input_tokens` with shape `(batch_size, seq_len - 1)`
-- target labels: `output_tokens` with shape `(batch_size, seq_len - 1)`
-- model output: `logits` with shape `(batch_size, seq_len - 1, 5000)`
+| Tensor | Shape | Meaning |
+| --- | --- | --- |
+| raw sample | one `input_ids` list | tokenized LMX sequence from the HuggingFace dataset |
+| cropped sample | up to `1024` tokens | after random crop or deterministic prefix crop |
+| `tokens` | `(batch_size, seq_len)` | batch after dynamic padding |
+| `input_tokens` | `(batch_size, seq_len - 1)` | decoder input tokens |
+| `output_tokens` | `(batch_size, seq_len - 1)` | next-token labels |
+| `padding_mask` | `(batch_size, seq_len - 1)` | `True` where the position is PAD |
+| `logits` | `(batch_size, seq_len - 1, 5000)` | token logits over the vocabulary |
 
 ### Decoder
 
@@ -91,6 +109,7 @@ flowchart TD
 - `num_layers = 2`
 - `dim_feedforward = 1024`
 - `dropout = 0.0`
+- `activation = relu`
 - positional encoding: sinusoidal
 
 ### Implementation Files
@@ -108,39 +127,54 @@ flowchart TD
 - training config:
   - [`midi2score/trainers/config.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/trainers/config.py)
 
-### Model Graph
+### Model Stack
 
 ```mermaid
 flowchart TD
-    A["input_tokens (B, T)"] --> B["Token embedding"]
-    B --> C["Scale by sqrt(d_model)"]
-    C --> D["Sinusoidal positional encoding"]
-    D --> E["Embedding dropout"]
-    E --> F["Decoder layer 1"]
-    F --> G["Decoder layer 2"]
-    G --> H["Final layer norm"]
-    H --> I["Linear projection to vocab"]
-    I --> J["logits (B, T, 5000)"]
+    A["input_tokens (B, T)"] --> B["token embedding"]
+    B --> C["scale by sqrt(d_model)"]
+    C --> D["sinusoidal positional encoding"]
+    D --> E["embedding dropout"]
+    E --> F["decoder layer 1"]
+    F --> G["decoder layer 2"]
+    G --> H["final layer norm"]
+    H --> I["linear projection to vocab"]
+    I --> J["logits (B, T-1, 5000)"]
 ```
 
-### Decoder Layer Graph
-
-```mermaid
-flowchart LR
-    A["Masked self-attention"] --> B["Residual + layer norm"]
-    B --> C["Feed-forward: Linear -> Activation -> Dropout -> Linear"]
-    C --> D["Residual + layer norm"]
+```text
+input_tokens (B, T)
+-> token embedding
+-> scale by sqrt(d_model)
+-> sinusoidal positional encoding
+-> embedding dropout
+-> decoder layer 1
+-> decoder layer 2
+-> final layer norm
+-> linear projection to vocab
+-> logits (B, T-1, 5000)
 ```
 
 ### Decoder Layer Details
 
-- each layer uses masked self-attention only during decoder pretraining
-- causal mask prevents token `t` from attending to future positions
-- there are `2` decoder layers
-- each layer contains:
-  - multi-head self-attention with `4` heads
-  - feed-forward block `256 -> 1024 -> 256`
-  - residual connections and layer norms
+```mermaid
+flowchart TD
+    A["masked self-attention"] --> B["residual + layer norm"]
+    B --> C["feed-forward: Linear -> Activation -> Dropout -> Linear"]
+    C --> D["residual + layer norm"]
+```
+
+| Layer step | Operation | Notes |
+| --- | --- | --- |
+| 1 | masked self-attention | causal mask prevents token `t` from attending to future positions |
+| 2 | residual + layer norm | first normalization point |
+| 3 | feed-forward block | `256 -> 1024 -> 256` with activation and dropout |
+| 4 | residual + layer norm | second normalization point |
+
+Additional notes:
+
+- there are `2` decoder layers in the recommended model
+- each layer uses `4` attention heads
 - cross-attention code exists for later seq2seq fine-tuning, but it is not used in decoder pretraining
 
 ### Training
@@ -152,26 +186,30 @@ flowchart LR
 - scheduler: `linear`
 - `warmup_steps = 500`
 - `min_lr_ratio = 0.1`
-- initialization: from scratch
-- run cap: `3600` seconds
+- initialization: resumed from the previous `3600s` run's `latest.pt`
+- continuation cap: `7200` seconds
 - validation cadence: `eval_every = 500`
 - early stopping:
   - `early_stopping_patience = 20`
   - `early_stopping_min_delta = 0.0`
 - safety cap: `num_steps = 1000000`
+- loss details:
+  - next-token cross-entropy
+  - `ignore_index = pad_token_id`
 
 ### Final Result
 
-- best validation loss: `1.8039128640666604`
-- full-validation recheck on the saved best checkpoint: `1.9305410517514143`
-- best checkpoint: `artifacts/research/EXP-RD-LONGCTX-034_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long/best.pt`
-- latest checkpoint: `artifacts/research/EXP-RD-LONGCTX-034_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_long/latest.pt`
-- actual stop condition: time-budget cap at `3600` seconds
+- best validation loss: `1.7874383879825473`
+- full-validation recheck on the saved best checkpoint: `1.9169188072371013`
+- best checkpoint: `artifacts/research/EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200/best.pt`
+- latest checkpoint: `artifacts/research/EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200/latest.pt`
+- actual stop condition: early stopping after the resumed run
 
 Note:
 
-- the lower `1.8039` number is the training-time model-selection metric computed on the configured validation subset (`num_eval_batches = 64`)
-- the `1.9305` number is the later full-validation recheck over the complete validation split
+- the lower `1.7874` number is the training-time model-selection metric computed on the configured validation subset (`num_eval_batches = 64`)
+- the `1.9169` number is the later full-validation recheck over the complete validation split
+- this best checkpoint came from continuing the prior `3600s` run with optimizer and scheduler state restored
 
 ## Follow-up Conclusions
 
