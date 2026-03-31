@@ -27,7 +27,7 @@ Important:
 
 - [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md): experiment history and decisions
 - [`configs/pretrain_baseline.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_baseline.yaml): current baseline config
-- [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py): standardized experiment runner
+- [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py): single entrypoint for direct training and managed experiments
 
 ## Allowed Changes
 
@@ -51,7 +51,7 @@ Preferred knobs:
 - Keep tokenizer fixed to `data/tokenizer_rd.json`.
 - Do not overwrite baseline checkpoints or baseline logs.
 - Start managed experiments from a clean git worktree.
-- Use [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py) so outputs land under:
+- Use [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) with `--experiment-id` so outputs land under:
   - `configs/research/<experiment_id>.yaml`
   - `artifacts/research/<experiment_id>/`
   - `logs/research/<experiment_id>.csv`
@@ -81,7 +81,7 @@ Classify outcomes this way:
 1. Read [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md).
 2. Choose one or more new experiments for the same batch.
 3. Commit code changes before running the batch if the worktree is dirty.
-4. Run the batch with [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py).
+4. Run the batch with [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) and `--experiment-id`.
 5. Read each generated `summary.json`.
 6. Update [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md) with:
    - a new `EXP-xxx` block
@@ -98,8 +98,8 @@ Batch rule:
 ## Example Command
 
 ```bash
-uv run python run_experiment.py \
-  --base-config configs/pretrain_baseline.yaml \
+uv run python run_pretrain.py \
+  --config configs/pretrain_baseline.yaml \
   --experiment-id EXP-TIMED-300-001_best180_baseline \
   --set model.d_model=128 \
   --set model.dim_feedforward=512 \
@@ -113,5 +113,5 @@ uv run python run_experiment.py \
 ## Notes
 
 - `training.num_steps` still exists as a safety cap, but timed experiments should normally stop because of `training.max_duration_seconds`.
-- [`run_experiment.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_experiment.py) now checks git cleanliness by default.
+- [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) now checks git cleanliness by default in managed experiment mode.
 - Use `--allow-dirty-git` only for local smoke tests, not for managed research runs.

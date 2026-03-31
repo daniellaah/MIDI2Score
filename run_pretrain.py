@@ -4,30 +4,32 @@ import argparse
 import json
 from pathlib import Path
 
+from midi2score.config import load_decoder_pretrain_config
 from midi2score.research import parse_override_value, run_research_experiment
+from midi2score.train import run_decoder_pretraining_loop
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run a standardized decoder-pretraining tuning experiment."
+        description="Run decoder pretraining directly or as a managed experiment."
     )
     parser.add_argument(
-        "--base-config",
+        "--config",
         type=Path,
         default=Path("configs/pretrain_baseline.yaml"),
         help="Path to the base YAML config.",
     )
     parser.add_argument(
         "--experiment-id",
-        required=True,
-        help="Short experiment identifier, used in output paths.",
+        default=None,
+        help="Optional experiment id. When set, run in managed experiment mode.",
     )
     parser.add_argument(
         "--set",
         dest="overrides",
         action="append",
         default=[],
-        help="Override in dotted form, e.g. model.d_model=128.",
+        help="Override in dotted form, e.g. model.d_model=256.",
     )
     parser.add_argument(
         "--note",
@@ -38,12 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--reference-best-loss",
         type=float,
         default=None,
-        help="Optional reference validation loss for automatic delta reporting.",
+        help="Optional reference validation loss for delta reporting.",
     )
     parser.add_argument(
         "--allow-dirty-git",
         action="store_true",
-        help="Allow running even when the git worktree is dirty.",
+        help="Allow running a managed experiment with a dirty worktree.",
     )
     return parser
 
@@ -51,8 +53,31 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     overrides = _parse_overrides(args.overrides)
+
+    if args.experiment_id is None:
+        if overrides or args.note is not None or args.reference_best_loss is not None:
+            raise ValueError("--set/--note/--reference-best-loss require --experiment-id.")
+        project_config = load_decoder_pretrain_config(args.config)
+        result = run_decoder_pretraining_loop(
+            project_config.model,
+            project_config.data,
+            project_config.training,
+        )
+        print(f"finished {len(result.losses)} pretraining steps on {result.device}")
+        print(
+            f"final_step={result.final_step} elapsed_seconds={result.elapsed_seconds:.2f} "
+            f"stopped_due_to_time_budget={result.stopped_due_to_time_budget}"
+        )
+        if result.best_validation_loss is not None:
+            print(f"best validation loss {result.best_validation_loss:.4f}")
+        if result.checkpoint_path is not None:
+            print(f"saved checkpoint to {result.checkpoint_path}")
+        if result.best_checkpoint_path is not None and result.best_validation_loss is not None:
+            print(f"saved best checkpoint to {result.best_checkpoint_path}")
+        return
+
     summary = run_research_experiment(
-        base_config_path=args.base_config,
+        base_config_path=args.config,
         experiment_id=args.experiment_id,
         overrides=overrides,
         note=args.note,

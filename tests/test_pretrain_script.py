@@ -48,7 +48,7 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
     )
 
     result = subprocess.run(
-        ["uv", "run", "python", "pretrain.py", "--config", str(config_path)],
+        ["uv", "run", "python", "run_pretrain.py", "--config", str(config_path)],
         check=True,
         capture_output=True,
         text=True,

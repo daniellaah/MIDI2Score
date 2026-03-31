@@ -173,7 +173,7 @@ So the current setup is:
   - experiment summary JSON writing
   - git metadata capture for experiments
 
-- `run_experiment.py`
+- `run_pretrain.py`
   - command-line entrypoint for one controlled tuning run
 
 - `program.md`
@@ -190,7 +190,7 @@ So the current setup is:
 - `configs/pretrain_baseline.yaml`
   - default real-data pretraining config
 
-- `pretrain.py`
+- `run_pretrain.py`
   - command-line entrypoint
 
 ## 5. Important Config Behavior
@@ -270,13 +270,13 @@ uv run pytest -q
 Run decoder pretraining:
 
 ```bash
-uv run python pretrain.py --config configs/pretrain_baseline.yaml
+uv run python run_pretrain.py --config configs/pretrain_baseline.yaml
 ```
 
 Run one standardized research experiment:
 
 ```bash
-uv run python run_experiment.py --base-config configs/pretrain_baseline.yaml --experiment-id my-exp --set training.num_steps=1000000 --set training.max_duration_seconds=300 --set model.dropout=0.0
+uv run python run_pretrain.py --config configs/pretrain_baseline.yaml --experiment-id my-exp --set training.num_steps=1000000 --set training.max_duration_seconds=300 --set model.dropout=0.0
 ```
 
 Default checkpoint output:
@@ -344,7 +344,7 @@ If another agent needs to get up to speed quickly, read in this order:
 7. `midi2score/models/modules.py`
 8. `midi2score/models/decoder_lm.py`
 9. `midi2score/trainers/pretrain_loop.py`
-10. `pretrain.py`
+10. `run_pretrain.py`
 
 Then inspect tests:
 
@@ -358,7 +358,7 @@ Then inspect tests:
 If work continues on decoder pretraining, the most natural next steps are:
 
 1. keep running single-variable experiments and record them in `exp.md`
-2. tune width / depth / dropout / learning rate with `run_experiment.py`
+2. tune width / depth / dropout / learning rate with `run_pretrain.py --experiment-id ...`
 3. use 300-second timed baselines when the budget policy changes
 4. consider a separate full-dataset baseline once rd tuning stabilizes
 
