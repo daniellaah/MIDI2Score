@@ -1,6 +1,6 @@
 # Decoder Pretraining
 
-Last updated: 2026-03-30
+Last updated: 2026-03-31
 
 ## Recommended Run At A Glance
 
@@ -25,8 +25,12 @@ Last updated: 2026-03-30
 - `warmup_steps = 500`
 - `min_lr_ratio = 0.1`
 - continuation budget: `7200` seconds
-- best model-selection loss during training: `1.7874383879825473`
-- full-validation recheck on the saved best checkpoint: `1.9169188072371013`
+- final reported validation CE uses the full validation split
+- full-validation metrics on the saved best checkpoint:
+  - CE loss: `1.9169`
+  - perplexity: `6.8000`
+  - token accuracy: `0.5908`
+  - top-5 accuracy: `0.7812`
 
 ## Final Recommended Model
 
@@ -180,7 +184,7 @@ Additional notes:
 ### Training
 
 - objective: next-token prediction
-- model-selection metric: validation cross-entropy loss
+- model-selection metric during training: validation cross-entropy loss
 - additional validation metrics:
   - perplexity
   - token accuracy
@@ -193,6 +197,7 @@ Additional notes:
 - initialization: resumed from the previous `3600s` run's `latest.pt`
 - continuation cap: `7200` seconds
 - validation cadence: `eval_every = 500`
+- final reported metrics are computed on the full validation split
 - early stopping:
   - `early_stopping_patience = 20`
   - `early_stopping_min_delta = 0.0`
@@ -203,8 +208,12 @@ Additional notes:
 
 ### Final Result
 
-- best validation loss: `1.7874383879825473`
-- full-validation recheck on the saved best checkpoint: `1.9169188072371013`
+- training-time best validation loss on subset eval (`num_eval_batches = 64`): `1.7874`
+- full-validation metrics on the saved best checkpoint:
+  - CE loss: `1.9169`
+  - perplexity: `6.8000`
+  - token accuracy: `0.5908`
+  - top-5 accuracy: `0.7812`
 - best checkpoint: `artifacts/research/EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200/best.pt`
 - latest checkpoint: `artifacts/research/EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200/latest.pt`
 - actual stop condition: early stopping after the resumed run
@@ -212,9 +221,12 @@ Additional notes:
 Note:
 
 - the lower `1.7874` number is the training-time model-selection metric computed on the configured validation subset (`num_eval_batches = 64`)
-- the `1.9169` number is the later full-validation recheck over the complete validation split
+- the final reported numbers above are the full-validation metrics over the complete validation split
 - this best checkpoint came from continuing the prior `3600s` run with optimizer and scheduler state restored
 - training still selects checkpoints by validation cross-entropy; the extra metrics are for diagnosis and comparison
+- a separate from-scratch `7200s` run with full validation during training reached:
+  - training-time best full-validation CE: `1.9331`
+  - it did not beat the resumed best checkpoint on full-validation CE (`1.9169`)
 
 ## Follow-up Conclusions
 

@@ -2097,3 +2097,47 @@ Main takeaway:
 - the original `3600s` run had not fully converged
 - giving the same branch more budget, while keeping the same model and optimizer recipe, produced a real improvement
 - the current recommended `rd` best checkpoint is now `EXP-RD-LONGCTX-037 ... /best.pt`
+
+## 2026-03-31 Full-Validation Reporting Update
+
+Goal:
+
+- align the final reported `rd/full` metrics with full-validation evaluation instead of the subset validation used during training
+- run one more `rd` from-scratch confirmation experiment with full validation inside the training loop
+
+Full-validation metrics for current recommended checkpoints:
+
+- `rd` recommended checkpoint:
+  - experiment: `EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200`
+  - CE loss: `1.9169`
+  - perplexity: `6.8000`
+  - token accuracy: `0.5908`
+  - top-5 accuracy: `0.7812`
+
+- `full` recommended checkpoint:
+  - experiment: `EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long`
+  - CE loss: `2.1232`
+  - perplexity: `8.3580`
+  - token accuracy: `0.5258`
+  - top-5 accuracy: `0.7480`
+
+From-scratch full-validation training run:
+
+- `EXP-RD-LONGCTX-039_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_scratch7200_fullval`
+  - change: rerun the current `rd` best recipe from scratch with `num_eval_batches = null`
+  - result:
+    - best training-time full-validation CE: `1.9331`
+    - perplexity: `6.9107`
+    - token accuracy: `0.5868`
+    - top-5 accuracy: `0.7782`
+  - stop condition:
+    - early stopping at step `80000`
+    - did not beat the resumed checkpoint
+  - conclusion: useful as a confirmation run, but not promotable
+
+Main takeaway:
+
+- final report values should come from full-validation evaluation, not from subset validation during training
+- after switching to full-validation reporting, the recommended checkpoints stay the same:
+  - `rd` best remains `EXP-RD-LONGCTX-037`
+  - `full` best remains `EXP-FULL-RDREF-003`

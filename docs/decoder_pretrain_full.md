@@ -1,6 +1,6 @@
 # Decoder Pretraining on `huggingface_full`
 
-Last updated: 2026-03-27
+Last updated: 2026-03-31
 
 ## Recommended Full-Data Run
 
@@ -53,10 +53,16 @@ Last updated: 2026-03-27
 - `early_stopping_min_delta = 0.0`
 - wall-clock cap: `3600` seconds
 - actual stop condition: early stopping before the time cap
+- final reported metrics are computed on the full validation split
 
 ### Final Result
 
-- best validation loss: `2.101936012506485`
+- training-time best validation loss on subset eval: `2.1019`
+- full-validation metrics on the saved best checkpoint:
+  - CE loss: `2.1232`
+  - perplexity: `8.3580`
+  - token accuracy: `0.5258`
+  - top-5 accuracy: `0.7480`
 - final step: `223000`
 - elapsed seconds: `2293.68`
 - best checkpoint: `artifacts/research/EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long/best.pt`
