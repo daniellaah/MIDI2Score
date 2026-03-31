@@ -119,17 +119,15 @@ flowchart TD
 ### Implementation Files
 
 - dataset and collate:
-  - [`midi2score/data/language_model_dataset.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/data/language_model_dataset.py)
+  - [`midi2score/data.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/data.py)
 - model entrypoint:
-  - [`midi2score/models/decoder_lm.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/models/decoder_lm.py)
-- decoder blocks / positional encodings:
-  - [`midi2score/models/modules.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/models/modules.py)
+  - [`midi2score/model.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/model.py)
 - model config:
-  - [`midi2score/models/decoder_config.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/models/decoder_config.py)
+  - [`midi2score/model.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/model.py)
 - training loop:
-  - [`midi2score/trainers/pretrain_loop.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/trainers/pretrain_loop.py)
+  - [`midi2score/train.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/train.py)
 - training config:
-  - [`midi2score/trainers/config.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/trainers/config.py)
+  - [`midi2score/train.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/midi2score/train.py)
 
 ### Model Stack
 

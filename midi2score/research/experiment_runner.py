@@ -12,9 +12,9 @@ import yaml
 
 from midi2score.config import load_decoder_pretrain_config
 from midi2score.data import LanguageModelDataConfig
-from midi2score.models import DecoderLanguageModelConfig
+from midi2score.model import DecoderLanguageModelConfig
 from midi2score.research.git_utils import collect_git_metadata, require_clean_git_worktree
-from midi2score.trainers import TrainingConfig, run_decoder_pretraining_loop
+from midi2score.train import TrainingConfig, run_decoder_pretraining_loop
 
 _EXPERIMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _ALLOWED_OVERRIDE_FIELDS = {

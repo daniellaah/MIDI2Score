@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from midi2score.config import load_decoder_pretrain_config
-from midi2score.trainers import run_decoder_pretraining_loop
+from midi2score.train import run_decoder_pretraining_loop
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -1,31 +1,8 @@
 import pytest
 
-from midi2score.data.config import LanguageModelDataConfig
-from midi2score.models.config import ModelConfig
-from midi2score.models.decoder_config import DecoderLanguageModelConfig
-from midi2score.trainers import TrainingConfig
-
-
-def test_model_config_validate() -> None:
-    cfg = ModelConfig(
-        src_vocab_size=128,
-        tgt_vocab_size=256,
-        d_model=256,
-        nhead=8,
-    )
-
-    cfg.validate()
-    assert cfg.head_dim == 32
-
-
-def test_model_config_rejects_invalid_attention_shape() -> None:
-    with pytest.raises(ValueError, match="divisible"):
-        ModelConfig(
-            src_vocab_size=128,
-            tgt_vocab_size=256,
-            d_model=250,
-            nhead=8,
-        )
+from midi2score.data import LanguageModelDataConfig
+from midi2score.model import DecoderLanguageModelConfig
+from midi2score.train import TrainingConfig
 
 
 def test_language_model_data_config_rejects_invalid_split() -> None:

@@ -7,8 +7,8 @@ from typing import Any
 import yaml
 
 from midi2score.data import LanguageModelDataConfig
-from midi2score.models import DecoderLanguageModelConfig
-from midi2score.trainers import TrainingConfig
+from midi2score.model import DecoderLanguageModelConfig
+from midi2score.train import TrainingConfig
 
 
 @dataclass(slots=True)

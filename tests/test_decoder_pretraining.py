@@ -7,23 +7,18 @@ import torch
 from midi2score.data import (
     HuggingFaceLanguageModelDataset,
     LanguageModelDataConfig,
+    LengthBucketBatchSampler,
     build_language_model_dataloader,
 )
-from midi2score.data.language_model_dataset import LengthBucketBatchSampler
-from midi2score.models import (
-    DecoderLanguageModelConfig,
-    ModelConfig,
-    TransformerDecoderLM,
-    TransformerSeq2Seq,
-)
-from midi2score.trainers import (
+from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
+from midi2score.train import (
     DecoderEvaluationMetrics,
     TrainingConfig,
+    build_lr_scheduler,
     evaluate_decoder_language_model,
     evaluate_decoder_language_model_metrics,
     run_decoder_pretraining_loop,
 )
-from midi2score.trainers.pretrain_loop import build_lr_scheduler
 
 
 def build_small_real_batch() -> tuple[DecoderLanguageModelConfig, object]:
@@ -477,7 +472,7 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
 
     clock_values = iter([0.0, 0.6, 1.2, 1.8])
     monkeypatch.setattr(
-        "midi2score.trainers.pretrain_loop.time.monotonic",
+        "midi2score.train.time.monotonic",
         lambda: next(clock_values),
     )
 
@@ -521,7 +516,7 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
     validation_losses = iter([5.0, 5.5, 5.6])
 
     monkeypatch.setattr(
-        "midi2score.trainers.pretrain_loop.evaluate_decoder_language_model_metrics",
+        "midi2score.train.evaluate_decoder_language_model_metrics",
         lambda *args, **kwargs: DecoderEvaluationMetrics(
             loss=next(validation_losses),
             perplexity=1.0,
@@ -537,35 +532,3 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
     assert result.stopped_due_to_time_budget is False
     assert result.final_step == 6
     assert result.best_validation_loss == pytest.approx(5.0)
-
-
-def test_seq2seq_can_load_pretrained_decoder_weights() -> None:
-    torch.manual_seed(0)
-    decoder_config = DecoderLanguageModelConfig(
-        vocab_size=72,
-        d_model=32,
-        nhead=4,
-        num_layers=2,
-        dim_feedforward=64,
-        max_length=32,
-    )
-    decoder_model = TransformerDecoderLM(decoder_config)
-    seq2seq_config = ModelConfig(
-        src_vocab_size=64,
-        tgt_vocab_size=72,
-        d_model=32,
-        nhead=4,
-        num_encoder_layers=2,
-        num_decoder_layers=2,
-        dim_feedforward=64,
-        max_target_length=32,
-    )
-    seq2seq_model = TransformerSeq2Seq(seq2seq_config)
-
-    before = seq2seq_model.tgt_embedding.weight.detach().clone()
-    transferred_keys = seq2seq_model.load_pretrained_decoder_state(decoder_model.state_dict())
-    after = seq2seq_model.tgt_embedding.weight.detach()
-
-    assert "tgt_embedding.weight" in transferred_keys
-    assert torch.equal(after, decoder_model.tgt_embedding.weight.detach())
-    assert not torch.equal(before, after)
