@@ -219,7 +219,7 @@ Additional notes:
 
 ### Loss Curves
 
-![Decoder pretraining loss curves](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_losses.svg)
+![Decoder pretraining loss curves](./decoder_pretrain_losses.svg)
 
 Note:
 
