@@ -217,6 +217,10 @@ Additional notes:
 - latest checkpoint: `artifacts/pretrained_decoder_rd_best.pt`
 - actual stop condition: early stopping at step `80000` with best step `70000`
 
+### Loss Curves
+
+![Decoder pretraining loss curves](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_losses.svg)
+
 Note:
 
 - the final reported numbers above are the full-validation metrics over the complete validation split
