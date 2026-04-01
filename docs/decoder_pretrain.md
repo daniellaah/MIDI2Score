@@ -4,6 +4,7 @@ Last updated: 2026-03-31
 
 ## Recommended Run At A Glance
 
+- runnable config: `configs/pretrain_rd_best.yaml`
 - dataset: `data/huggingface`
 - tokenizer: `data/tokenizer_rd.json`
 - `max_length = 1024`
@@ -27,10 +28,10 @@ Last updated: 2026-03-31
 - continuation budget: `7200` seconds
 - final reported validation CE uses the full validation split
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.9169`
-  - perplexity: `6.8000`
-  - token accuracy: `0.5908`
-  - top-5 accuracy: `0.7812`
+  - CE loss: `1.9336`
+  - perplexity: `6.9145`
+  - token accuracy: `0.5875`
+  - top-5 accuracy: `0.7775`
 
 ## Final Recommended Model
 
@@ -192,7 +193,7 @@ Additional notes:
 - scheduler: `linear`
 - `warmup_steps = 500`
 - `min_lr_ratio = 0.1`
-- initialization: resumed from the previous `3600s` run's `latest.pt`
+- initialization: from scratch
 - continuation cap: `7200` seconds
 - validation cadence: `eval_every = 500`
 - final reported metrics are computed on the full validation split
@@ -206,25 +207,21 @@ Additional notes:
 
 ### Final Result
 
-- training-time best validation loss on subset eval (`num_eval_batches = 64`): `1.7874`
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.9169`
-  - perplexity: `6.8000`
-  - token accuracy: `0.5908`
-  - top-5 accuracy: `0.7812`
-- best checkpoint: `artifacts/research/EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200/best.pt`
-- latest checkpoint: `artifacts/research/EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200/latest.pt`
-- actual stop condition: early stopping after the resumed run
+  - CE loss: `1.9336`
+  - perplexity: `6.9145`
+  - token accuracy: `0.5875`
+  - top-5 accuracy: `0.7775`
+- evaluated tokens: `3,189,336`
+- best checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
+- latest checkpoint: `artifacts/pretrained_decoder_rd_best.pt`
+- actual stop condition: early stopping at step `80000` with best step `70000`
 
 Note:
 
-- the lower `1.7874` number is the training-time model-selection metric computed on the configured validation subset (`num_eval_batches = 64`)
 - the final reported numbers above are the full-validation metrics over the complete validation split
-- this best checkpoint came from continuing the prior `3600s` run with optimizer and scheduler state restored
 - training still selects checkpoints by validation cross-entropy; the extra metrics are for diagnosis and comparison
-- a separate from-scratch `7200s` run with full validation during training reached:
-  - training-time best full-validation CE: `1.9331`
-  - it did not beat the resumed best checkpoint on full-validation CE (`1.9169`)
+- this recommended result comes from a fully reproducible from-scratch run using `configs/pretrain_rd_best.yaml`
 
 ## Follow-up Conclusions
 

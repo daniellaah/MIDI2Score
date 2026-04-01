@@ -2082,21 +2082,16 @@ Key result:
 
 - `EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200`
   - change: resume the current `rd` best run and allow up to `7200s`
-  - resume source: `EXP-RD-LONGCTX-034 ... /latest.pt`
   - result: best validation loss `1.7874`
-  - comparison:
-    - better than the previous best `1.8039`
-    - full-validation recheck of the new best checkpoint: `1.9169`
-  - stop condition:
-    - did not use the full `7200s`
-    - early stopping triggered after about `1080.6s` of additional training
-  - conclusion: useful and promotable
+  - full-validation recheck: `1.9169`
+  - later decision:
+    - dropped from the recommended result set
+    - reason: resume-based training is less reproducible than a clean from-scratch run
 
 Main takeaway:
 
-- the original `3600s` run had not fully converged
-- giving the same branch more budget, while keeping the same model and optimizer recipe, produced a real improvement
-- the current recommended `rd` best checkpoint is now `EXP-RD-LONGCTX-037 ... /best.pt`
+- the resume experiment showed the branch still had headroom
+- but it is no longer treated as the official `rd` best result
 
 ## 2026-03-31 Full-Validation Reporting Update
 
@@ -2108,11 +2103,12 @@ Goal:
 Full-validation metrics for current recommended checkpoints:
 
 - `rd` recommended checkpoint:
-  - experiment: `EXP-RD-LONGCTX-037_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs8_linearwarmup_resume7200`
-  - CE loss: `1.9169`
-  - perplexity: `6.8000`
-  - token accuracy: `0.5908`
-  - top-5 accuracy: `0.7812`
+  - config: `configs/pretrain_rd_best.yaml`
+  - checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
+  - CE loss: `1.9336`
+  - perplexity: `6.9145`
+  - token accuracy: `0.5875`
+  - top-5 accuracy: `0.7775`
 
 - `full` recommended checkpoint:
   - experiment: `EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long`
@@ -2135,9 +2131,26 @@ From-scratch full-validation training run:
     - did not beat the resumed checkpoint
   - conclusion: useful as a confirmation run, but not promotable
 
+Repeated from-scratch full-validation training run:
+
+- `EXP-RD-BEST-7200-FULLRUN`
+  - config: `configs/pretrain_rd_best.yaml`
+  - change: rerun the same current `rd` best recipe from scratch again
+  - result:
+    - best training-time full-validation CE: `1.9336`
+    - perplexity: `6.9145`
+    - token accuracy: `0.5875`
+    - top-5 accuracy: `0.7775`
+  - stop condition:
+    - early stopping at step `80000`
+    - best step `70000`
+    - elapsed seconds `7110.76`
+    - did not beat the resumed checkpoint
+  - conclusion: useful as a second confirmation run, but not promotable
+
 Main takeaway:
 
 - final report values should come from full-validation evaluation, not from subset validation during training
-- after switching to full-validation reporting, the recommended checkpoints stay the same:
-  - `rd` best remains `EXP-RD-LONGCTX-037`
+- after enforcing the reproducibility rule for `rd`, the official best is now the from-scratch config run:
+  - `rd` best is `configs/pretrain_rd_best.yaml` with checkpoint `artifacts/pretrained_decoder_rd_best_best.pt`
   - `full` best remains `EXP-FULL-RDREF-003`
