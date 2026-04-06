@@ -2281,3 +2281,32 @@ Recommendation:
 
 - `batch_size=16` is the only point in this sweep that improved on the clean baseline by more than the `0.03` promotion threshold
 - the clean stride=512 branch still looks worth pursuing, and the next batch should focus around the newly useful `batch_size=16` point rather than re-running the same nearby sizes
+
+## Active Sliding-Window Learning-Rate Sweep on Batch-Size-16 Reference
+
+Reference baseline:
+
+- experiment id: `EXP-RD-SLIDING-BASELINE-300-016`
+- setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`, `training.batch_size=16`, `training.learning_rate=6e-4`
+- best validation loss: `3.043229905482916`
+
+Learning-rate sweep:
+
+- `EXP-RD-SLIDING-BASELINE-300-017`
+  - `training.learning_rate=5e-4`
+  - best validation loss: `4.155871837705841`
+  - classification: worse
+- `EXP-RD-SLIDING-BASELINE-300-018`
+  - `training.learning_rate=7e-4`
+  - best validation loss: `3.757171293423122`
+  - classification: worse
+- `EXP-RD-SLIDING-BASELINE-300-019`
+  - `training.learning_rate=8e-4`
+  - best validation loss: `3.5788612127251143`
+  - classification: worse
+
+Recommendation:
+
+- none of the tested learning rates improved on the `batch_size=16` reference
+- `batch_size=16` remains the strongest setting in this local sweep
+- if we continue, the next batch should change a different knob rather than keep narrowing learning rate around the same point
