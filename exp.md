@@ -48,3 +48,31 @@ Recommendation:
 
 - the first sweep suggests that simply increasing token budget is not helping on MPS
 - next batch should probe a smaller neighborhood around the baseline, or change a different knob such as `learning_rate` or `batch_size` while keeping the no-truncation pipeline fixed
+
+## Active No-Truncation Learning-Rate Batch
+
+Reference baseline:
+
+- experiment id: `EXP-RD-NOTRUNC-BASELINE-300-001`
+- setup: `max_length=null`, `length_bucketing=true`, `max_tokens_per_batch=8192`
+- best validation loss: `5.336567202039044`
+
+Second learning-rate sweep:
+
+- `EXP-RD-NOTRUNC-BASELINE-300-005`
+  - `training.learning_rate=3e-4`
+  - best validation loss: `7.493586902719949`
+  - classification: worse
+- `EXP-RD-NOTRUNC-BASELINE-300-006`
+  - `training.learning_rate=8e-4`
+  - best validation loss: `6.423977997053251`
+  - classification: worse
+- `EXP-RD-NOTRUNC-BASELINE-300-007`
+  - `training.learning_rate=1e-3`
+  - best validation loss: `6.200319615583576`
+  - classification: worse
+
+Recommendation:
+
+- this sweep suggests the no-truncation branch is still under-optimized and does not like the current learning-rate range
+- next batch should try a different training knob rather than pushing learning rate further, for example `batch_size` around the baseline or a smaller `max_tokens_per_batch` neighborhood around `8192`
