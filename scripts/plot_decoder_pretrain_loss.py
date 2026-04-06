@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 from pathlib import Path
 
@@ -53,6 +54,29 @@ def parse_log(log_path: Path) -> tuple[list[tuple[int, float]], list[tuple[int, 
     return train_losses, val_losses
 
 
+def parse_csv(csv_path: Path) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
+    train_losses: list[tuple[int, float]] = []
+    val_losses: list[tuple[int, float]] = []
+
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            step = int(row["step"])
+            metric = row["metric"]
+            value = float(row["value"])
+            split = row["split"]
+            if split == "train" and metric == "loss":
+                train_losses.append((step, value))
+            elif split == "validation" and metric == "loss":
+                val_losses.append((step, value))
+
+    if not train_losses:
+        raise ValueError(f"No train losses found in {csv_path}.")
+    if not val_losses:
+        raise ValueError(f"No validation losses found in {csv_path}.")
+
+    return train_losses, val_losses
+
+
 def moving_average(points: list[tuple[int, float]], window: int) -> tuple[list[int], list[float]]:
     steps: list[int] = []
     values: list[float] = []
@@ -66,7 +90,10 @@ def moving_average(points: list[tuple[int, float]], window: int) -> tuple[list[i
 
 def main() -> None:
     args = parse_args()
-    train_losses, val_losses = parse_log(args.log)
+    if args.log.suffix == ".csv":
+        train_losses, val_losses = parse_csv(args.log)
+    else:
+        train_losses, val_losses = parse_log(args.log)
 
     train_steps, train_values = moving_average(train_losses, window=args.window)
     val_steps = [step for step, _ in val_losses]

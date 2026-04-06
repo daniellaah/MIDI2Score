@@ -13,6 +13,14 @@ Current official checkpoints and runnable configs are:
   - latest checkpoint: `artifacts/pretrained_decoder_full_best.pt`
   - best checkpoint: `artifacts/pretrained_decoder_full_best_best.pt`
 
+Current `rd` best branch:
+
+- `1024` full-coverage sliding window
+- `sliding_window_stride=512`
+- from scratch
+- full-validation CE: `1.8351`
+- best checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
+
 Archived materials:
 
 - historical experiment notes: `archives/exp.md`
@@ -219,3 +227,26 @@ Recommendation:
 - all tested batch sizes are clearly worse than the `stride=512` reference
 - the `rd` sliding-window branch does not currently look promising under batch-size tuning alone
 - if we continue, the next batch should change a different knob rather than expand the batch-size sweep
+
+## Active Sliding-Window Long-Budget Promotion
+
+Reference:
+
+- promoted candidate: `EXP-RD-SLIDING-300-003`
+- setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`
+- reason for promotion: strongest clean `300s` baseline on the sliding-window branch
+
+Long-budget result:
+
+- `EXP-RD-SLIDING-LONG-001`
+  - `training.max_duration_seconds=7200`
+  - `training.num_eval_batches=null`
+  - from-scratch run with full-validation model selection
+  - best validation loss: `1.8351061700845759`
+  - best step: `61500`
+  - classification versus official `rd` best `1.9336`: useful
+
+Recommendation:
+
+- promote the `1024 + sliding_window_stride=512` branch to the new official `rd` best
+- update `configs/pretrain_rd_best.yaml`, best-model exports, and `docs/decoder_pretrain.md`

@@ -8,7 +8,8 @@ Last updated: 2026-03-31
 - dataset: `data/huggingface`
 - tokenizer: `data/tokenizer_rd.json`
 - `max_length = 1024`
-- training crop: random contiguous crop
+- training windows: full-coverage sliding windows
+- `sliding_window_stride = 512`
 - validation crop: deterministic prefix crop
 - length bucketing: `false`
 - batch padding: `dynamic`
@@ -28,10 +29,10 @@ Last updated: 2026-03-31
 - continuation budget: `7200` seconds
 - final reported validation CE uses the full validation split
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.9336`
-  - perplexity: `6.9145`
-  - token accuracy: `0.5875`
-  - top-5 accuracy: `0.7775`
+  - CE loss: `1.8351`
+  - perplexity: `6.2658`
+  - token accuracy: `0.5909`
+  - top-5 accuracy: `0.7873`
 
 ## Final Recommended Model
 
@@ -47,7 +48,7 @@ Last updated: 2026-03-31
 
 - one dataset row produces one token sequence
 - `max_length = 1024`
-- training: random contiguous crop for overlength samples
+- training: full-coverage sliding windows with stride `512`
 - validation / test: deterministic prefix crop for overlength samples
 - training batches do not use length bucketing
 - batch padding: dynamic
@@ -68,7 +69,7 @@ flowchart TD
     A["Linearized MusicXML (.lmx)"] --> B["BPE tokenizer (tokenizer_rd.json)"]
     B --> C["HuggingFace dataset row: input_ids"]
     C --> D{"split"}
-    D -->|training| E["random contiguous crop if length > 1024"]
+    D -->|training| E["full-coverage sliding windows (length 1024, stride 512)"]
     D -->|validation / test| F["deterministic prefix crop if length > 1024"]
     E --> G["dynamic padding inside each batch"]
     F --> G
@@ -87,7 +88,7 @@ flowchart TD
 | Preprocessing asset | raw score files | `.lmx` files | upstream preprocessing emits Linearized MusicXML |
 | Tokenization | `.lmx` | `input_ids` | tokenizer: `data/tokenizer_rd.json` |
 | Dataset row | `input_ids` list | one sample | one row corresponds to one token sequence |
-| Length control | one sample | trimmed token sequence | training uses random contiguous crop; validation/test use deterministic prefix crop |
+| Length control | one sample | one or more training windows | training expands overlength samples into full-coverage sliding windows; validation/test use deterministic prefix crop |
 | Batch collation | list of trimmed sequences | `tokens` with shape `(B, T)` | dynamic padding to the longest sample in the batch |
 | LM shift | `tokens` | `input_tokens`, `output_tokens` | `input_tokens = tokens[:, :-1]`, `output_tokens = tokens[:, 1:]` |
 | Forward pass | `input_tokens` | `logits` | decoder-only Transformer outputs `(B, T-1, vocab_size)` |
@@ -98,7 +99,7 @@ flowchart TD
 | Tensor | Shape | Meaning |
 | --- | --- | --- |
 | raw sample | one `input_ids` list | tokenized LMX sequence from the HuggingFace dataset |
-| cropped sample | up to `1024` tokens | after random crop or deterministic prefix crop |
+| training window | up to `1024` tokens | after sliding-window expansion or deterministic prefix crop |
 | `tokens` | `(batch_size, seq_len)` | batch after dynamic padding |
 | `input_tokens` | `(batch_size, seq_len - 1)` | decoder input tokens |
 | `output_tokens` | `(batch_size, seq_len - 1)` | next-token labels |
@@ -178,7 +179,6 @@ Additional notes:
 
 - there are `2` decoder layers in the recommended model
 - each layer uses `4` attention heads
-- cross-attention code exists for later seq2seq fine-tuning, but it is not used in decoder pretraining
 
 ### Training
 
@@ -208,14 +208,14 @@ Additional notes:
 ### Final Result
 
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.9336`
-  - perplexity: `6.9145`
-  - token accuracy: `0.5875`
-  - top-5 accuracy: `0.7775`
+  - CE loss: `1.8351`
+  - perplexity: `6.2658`
+  - token accuracy: `0.5909`
+  - top-5 accuracy: `0.7873`
 - evaluated tokens: `3,189,336`
 - best checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
 - latest checkpoint: `artifacts/pretrained_decoder_rd_best.pt`
-- actual stop condition: early stopping at step `80000` with best step `70000`
+- actual stop condition: time-budget stop at step `63952` with best step `61500`
 
 ### Loss Curves
 
@@ -262,7 +262,7 @@ Note:
 - dropout logic is correct; it is active only in train mode and disabled in eval mode
 - verification lives in `tests/test_decoder_pretraining.py`
 - `dropout = 0.05` was clearly worse in smoke testing: best validation loss `3.7221`
-- likely explanation: this setup is already regularized by random crop and early stopping, while dropout is applied at embedding, attention, FFN, and residual paths, so added noise hurts optimization more than it helps generalization
+- likely explanation: this setup is already regularized by the fixed 1024-token training windows and early stopping, while dropout is applied at embedding, attention, FFN, and residual paths, so added noise hurts optimization more than it helps generalization
 
 ### Positional Encoding
 
