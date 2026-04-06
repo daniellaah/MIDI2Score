@@ -20,6 +20,33 @@ Archived materials:
 - research checkpoints and summaries: `archives/artifacts/research/`
 - historical logs: `archives/logs/`
 
+## Active Sliding-Window Batch
+
+Reference baseline:
+
+- experiment id: `EXP-RD-SLIDING-BASELINE-300-001`
+- setup: `max_length=1024`, `random_crop=true`, `sliding_window_stride=null`
+- best validation loss: `2.764584154146198`
+
+Full-coverage sliding-window comparison:
+
+- `EXP-RD-SLIDING-300-002`
+  - `data.random_crop=false`
+  - `data.sliding_window_stride=1024`
+  - best validation loss: `2.422784344175074`
+  - classification: useful
+- `EXP-RD-SLIDING-300-003`
+  - `data.random_crop=false`
+  - `data.sliding_window_stride=512`
+  - best validation loss: `2.3037683321482296`
+  - classification: useful
+
+Recommendation:
+
+- for the `rd` 1024 branch, using full-coverage sliding windows is clearly better than single-window random crop under the same 300-second budget
+- `stride=512` is currently the strongest 300-second baseline on this branch
+- next batch should tune around this new sliding-window baseline rather than return to the no-truncation branch
+
 ## Active No-Truncation Batch
 
 Reference baseline:
