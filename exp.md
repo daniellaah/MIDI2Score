@@ -132,3 +132,32 @@ Recommendation:
 - the local token-budget search around `8192` is still clearly worse than the baseline
 - this no-truncation branch does not currently look worth extending further on token budget alone
 - if we continue, the next batch should change a different knob, such as `batch_size`, or revisit the validation/training schedule rather than pushing token budget again
+
+## Active Sliding-Window Neighborhood Batch
+
+Reference baseline:
+
+- experiment id: `EXP-RD-SLIDING-300-003`
+- setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`
+- best validation loss: `2.3037683321482296`
+
+Stride neighborhood sweep:
+
+- `EXP-RD-SLIDING-300-004`
+  - `data.sliding_window_stride=256`
+  - best validation loss: `3.2007620330916446`
+  - classification: worse
+- `EXP-RD-SLIDING-300-005`
+  - `data.sliding_window_stride=384`
+  - best validation loss: `2.8975163639434687`
+  - classification: worse
+- `EXP-RD-SLIDING-300-006`
+  - `data.sliding_window_stride=768`
+  - best validation loss: `3.3747011853710123`
+  - classification: worse
+
+Recommendation:
+
+- none of the local stride settings improved on the `stride=512` reference
+- the `rd` sliding-window branch looks saturated under the current 300-second budget
+- if we continue this branch, the next batch should change a different knob rather than continue narrowing the stride search
