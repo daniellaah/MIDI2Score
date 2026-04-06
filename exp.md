@@ -2253,3 +2253,31 @@ Main takeaway:
   - `random_crop=false`
   - `sliding_window_stride=512`
 - final reported `rd` metrics should use the corrected full-coverage validation procedure rather than prefix-only evaluation
+
+## Active Sliding-Window Batch-Size Sweep on Clean Baseline 013
+
+Reference baseline:
+
+- experiment id: `EXP-RD-SLIDING-BASELINE-300-013`
+- setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`, `training.learning_rate=6e-4`
+- best validation loss: `3.1823231705404424`
+
+Batch-size sweep:
+
+- `EXP-RD-SLIDING-BASELINE-300-014`
+  - `training.batch_size=6`
+  - best validation loss: `3.3988629157542927`
+  - classification: worse
+- `EXP-RD-SLIDING-BASELINE-300-015`
+  - `training.batch_size=12`
+  - best validation loss: `3.434834890814393`
+  - classification: worse
+- `EXP-RD-SLIDING-BASELINE-300-016`
+  - `training.batch_size=16`
+  - best validation loss: `3.043229905482916`
+  - classification: useful
+
+Recommendation:
+
+- `batch_size=16` is the only point in this sweep that improved on the clean baseline by more than the `0.03` promotion threshold
+- the clean stride=512 branch still looks worth pursuing, and the next batch should focus around the newly useful `batch_size=16` point rather than re-running the same nearby sizes
