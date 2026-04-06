@@ -57,6 +57,7 @@ class LanguageModelDataConfig:
 
 class LanguageModelExample(TypedDict):
     tokens: Tensor
+    loss_mask: Tensor
 
 
 @dataclass(slots=True)
@@ -64,13 +65,22 @@ class LanguageModelBatch:
     input_tokens: Tensor
     output_tokens: Tensor
     padding_mask: Tensor
+    loss_mask: Tensor | None = None
 
     def to(self, device: torch.device | str) -> "LanguageModelBatch":
         return LanguageModelBatch(
             input_tokens=self.input_tokens.to(device),
             output_tokens=self.output_tokens.to(device),
             padding_mask=self.padding_mask.to(device),
+            loss_mask=None if self.loss_mask is None else self.loss_mask.to(device),
         )
+
+
+@dataclass(slots=True)
+class WindowSpec:
+    raw_index: int
+    start: int
+    score_from: int = 0
 
 
 class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
@@ -81,32 +91,45 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
             raise ValueError("dataset_path must point to a HuggingFace DatasetDict.")
         self.dataset: HFDataset = dataset_dict[config.split]
         self._crop_generators: dict[int, torch.Generator] = {}
-        self._window_index: list[tuple[int, int]] | None = None
+        self._window_index: list[WindowSpec] | None = None
         if config.sliding_window_stride is not None:
-            self._window_index = self._build_window_index()
+            self._window_index = (
+                self._build_training_window_index()
+                if config.split == "training"
+                else self._build_evaluation_window_index()
+            )
 
     def __len__(self) -> int:
         return len(self._window_index) if self._window_index is not None else len(self.dataset)
 
     def __getitem__(self, index: int) -> LanguageModelExample:
-        raw_index, window_start = self._resolve_index(index)
+        raw_index, window_start, score_from = self._resolve_index(index)
         token_ids = self.dataset[raw_index]["input_ids"]
         tokens = self._trim_tokens(token_ids, window_start=window_start)
         if len(tokens) < 2:
             raise ValueError("Samples must contain at least 2 tokens.")
-        return {"tokens": torch.tensor(tokens, dtype=torch.long)}
+        loss_mask = torch.ones(len(tokens) - 1, dtype=torch.bool)
+        if score_from > 0:
+            loss_mask[: min(score_from, loss_mask.numel())] = False
+        return {
+            "tokens": torch.tensor(tokens, dtype=torch.long),
+            "loss_mask": loss_mask,
+        }
 
     def sequence_length(self, index: int) -> int:
-        raw_index, window_start = self._resolve_index(index)
+        raw_index, window_start, _ = self._resolve_index(index)
         length = len(self.dataset[raw_index]["input_ids"])
         if self.config.max_length is None:
             return length
+        if window_start is not None:
+            return min(length - window_start, self.config.max_length)
         return min(length, self.config.max_length)
 
-    def _resolve_index(self, index: int) -> tuple[int, int | None]:
+    def _resolve_index(self, index: int) -> tuple[int, int | None, int]:
         if self._window_index is None:
-            return index, None
-        return self._window_index[index]
+            return index, None, 0
+        spec = self._window_index[index]
+        return spec.raw_index, spec.start, spec.score_from
 
     def _trim_tokens(self, token_ids: list[int], *, window_start: int | None) -> list[int]:
         if self.config.max_length is None:
@@ -128,22 +151,52 @@ class HuggingFaceLanguageModelDataset(Dataset[LanguageModelExample]):
             return token_ids[start : start + self.config.max_length]
         return token_ids[: self.config.max_length]
 
-    def _build_window_index(self) -> list[tuple[int, int]]:
+    def _build_training_window_index(self) -> list[WindowSpec]:
         stride = self.config.sliding_window_stride
         assert stride is not None
         max_length = self.config.max_length
         assert max_length is not None
-        windows: list[tuple[int, int]] = []
+        windows: list[WindowSpec] = []
         for raw_index in range(len(self.dataset)):
             token_ids = self.dataset[raw_index]["input_ids"]
             if len(token_ids) <= max_length:
-                windows.append((raw_index, 0))
+                windows.append(WindowSpec(raw_index=raw_index, start=0))
                 continue
             max_start = len(token_ids) - max_length
             starts = list(range(0, max_start + 1, stride))
             if starts[-1] != max_start:
                 starts.append(max_start)
-            windows.extend((raw_index, start) for start in starts)
+            windows.extend(WindowSpec(raw_index=raw_index, start=start) for start in starts)
+        return windows
+
+    def _build_evaluation_window_index(self) -> list[WindowSpec]:
+        stride = self.config.sliding_window_stride
+        assert stride is not None
+        max_length = self.config.max_length
+        assert max_length is not None
+        step = min(stride, max_length - 1)
+        windows: list[WindowSpec] = []
+        for raw_index in range(len(self.dataset)):
+            token_ids = self.dataset[raw_index]["input_ids"]
+            if len(token_ids) <= max_length:
+                windows.append(WindowSpec(raw_index=raw_index, start=0, score_from=0))
+                continue
+            max_start = len(token_ids) - max_length
+            starts = list(range(0, max_start + 1, step))
+            if starts[-1] != max_start:
+                starts.append(max_start)
+            scored_until = 0
+            for start in starts:
+                end = min(start + max_length, len(token_ids))
+                score_from = max(0, scored_until - start)
+                windows.append(
+                    WindowSpec(
+                        raw_index=raw_index,
+                        start=start,
+                        score_from=score_from,
+                    )
+                )
+                scored_until = end - 1
         return windows
 
     def _get_crop_generator(self) -> torch.Generator:
@@ -269,6 +322,11 @@ def collate_language_model_batch(
         input_tokens=tokens[:, :-1],
         output_tokens=tokens[:, 1:],
         padding_mask=tokens[:, :-1].eq(pad_token_id),
+        loss_mask=pad_sequence(
+            [example["loss_mask"] for example in examples],
+            batch_first=True,
+            padding_value=False,
+        ),
     )
 
 

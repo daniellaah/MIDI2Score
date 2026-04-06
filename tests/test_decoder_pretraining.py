@@ -119,9 +119,9 @@ def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
     )
     raw_tokens = dataset.dataset[long_index]["input_ids"]
     starts = [
-        start
-        for raw_index, start in dataset._window_index or []
-        if raw_index == long_index
+        spec.start
+        for spec in dataset._window_index or []
+        if spec.raw_index == long_index
     ]
 
     assert len(starts) > 1
@@ -130,11 +130,40 @@ def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
 
     last_window_dataset_index = next(
         i
-        for i, (raw_index, start) in enumerate(dataset._window_index or [])
-        if raw_index == long_index and start == starts[-1]
+        for i, spec in enumerate(dataset._window_index or [])
+        if spec.raw_index == long_index and spec.start == starts[-1]
     )
     example = dataset[last_window_dataset_index]
     assert example["tokens"].tolist() == raw_tokens[starts[-1] : starts[-1] + config.max_length]
+    assert example["loss_mask"].all()
+
+
+def test_validation_sliding_window_scores_each_target_token_once() -> None:
+    config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=32,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+        sliding_window_stride=16,
+    )
+    dataset = HuggingFaceLanguageModelDataset(config)
+    long_index = next(
+        index
+        for index in range(len(dataset.dataset))
+        if len(dataset.dataset[index]["input_ids"]) > config.max_length * 3
+    )
+    raw_tokens = dataset.dataset[long_index]["input_ids"]
+    covered_targets: list[int] = []
+
+    for spec in dataset._window_index or []:
+        if spec.raw_index != long_index:
+            continue
+        window = dataset[next(i for i, candidate in enumerate(dataset._window_index or []) if candidate == spec)]
+        scored_positions = window["loss_mask"].nonzero(as_tuple=False).flatten().tolist()
+        covered_targets.extend(spec.start + 1 + position for position in scored_positions)
+
+    assert covered_targets == list(range(1, len(raw_tokens)))
 
 
 def test_length_bucket_batch_sampler_groups_examples_by_length() -> None:
@@ -391,6 +420,42 @@ def test_evaluate_decoder_language_model_metrics_uses_token_weighted_loss() -> N
 
     assert metrics.loss == pytest.approx(expected_loss)
     assert metrics.evaluated_tokens == 6
+
+
+def test_evaluate_decoder_language_model_metrics_respects_loss_mask() -> None:
+    class FixedModel(torch.nn.Module):
+        def eval(self):
+            return self
+
+        def forward(self, input_tokens, *, padding_mask=None):
+            return torch.tensor(
+                [[[4.0, 0.0], [0.0, 4.0], [4.0, 0.0]]],
+                dtype=torch.float32,
+            )
+
+    batch = LanguageModelBatch(
+        input_tokens=torch.tensor([[1, 2, 3]], dtype=torch.long),
+        output_tokens=torch.tensor([[0, 1, 0]], dtype=torch.long),
+        padding_mask=torch.zeros((1, 3), dtype=torch.bool),
+        loss_mask=torch.tensor([[False, True, True]], dtype=torch.bool),
+    )
+
+    metrics = evaluate_decoder_language_model_metrics(
+        FixedModel(),
+        [batch],
+        pad_token_id=99,
+        device="cpu",
+    )
+
+    expected_loss = float(
+        torch.nn.functional.cross_entropy(
+            torch.tensor([[0.0, 4.0], [4.0, 0.0]]),
+            torch.tensor([1, 0]),
+        )
+    )
+
+    assert metrics.loss == pytest.approx(expected_loss)
+    assert metrics.evaluated_tokens == 2
 
 
 def test_decoder_dropout_is_active_only_in_train_mode() -> None:

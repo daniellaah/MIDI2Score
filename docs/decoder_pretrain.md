@@ -10,7 +10,8 @@ Last updated: 2026-03-31
 - `max_length = 1024`
 - training windows: full-coverage sliding windows
 - `sliding_window_stride = 512`
-- validation crop: deterministic prefix crop
+- validation / test windows: full-coverage sliding-window evaluation
+- validation / test stride: `512`
 - length bucketing: `false`
 - batch padding: `dynamic`
 - model: decoder-only Transformer LM
@@ -29,10 +30,10 @@ Last updated: 2026-03-31
 - continuation budget: `7200` seconds
 - final reported validation CE uses the full validation split
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.8351`
-  - perplexity: `6.2658`
-  - token accuracy: `0.5909`
-  - top-5 accuracy: `0.7873`
+  - CE loss: `1.8128`
+  - perplexity: `6.1277`
+  - token accuracy: `0.5972`
+  - top-5 accuracy: `0.7900`
 
 ## Final Recommended Model
 
@@ -49,7 +50,7 @@ Last updated: 2026-03-31
 - one dataset row produces one token sequence
 - `max_length = 1024`
 - training: full-coverage sliding windows with stride `512`
-- validation / test: deterministic prefix crop for overlength samples
+- validation / test: full-coverage sliding-window evaluation with stride `512`
 - training batches do not use length bucketing
 - batch padding: dynamic
   - each batch is padded only to that batch's longest sample
@@ -70,7 +71,7 @@ flowchart TD
     B --> C["HuggingFace dataset row: input_ids"]
     C --> D{"split"}
     D -->|training| E["full-coverage sliding windows (length 1024, stride 512)"]
-    D -->|validation / test| F["deterministic prefix crop if length > 1024"]
+    D -->|validation / test| F["full-coverage sliding-window evaluation (stride 512)"]
     E --> G["dynamic padding inside each batch"]
     F --> G
     G --> H["tokens (B, T)"]
@@ -88,7 +89,7 @@ flowchart TD
 | Preprocessing asset | raw score files | `.lmx` files | upstream preprocessing emits Linearized MusicXML |
 | Tokenization | `.lmx` | `input_ids` | tokenizer: `data/tokenizer_rd.json` |
 | Dataset row | `input_ids` list | one sample | one row corresponds to one token sequence |
-| Length control | one sample | one or more training windows | training expands overlength samples into full-coverage sliding windows; validation/test use deterministic prefix crop |
+| Length control | one sample | one or more windows | training expands overlength samples into full-coverage sliding windows; validation/test also use sliding windows, but each target token is scored exactly once |
 | Batch collation | list of trimmed sequences | `tokens` with shape `(B, T)` | dynamic padding to the longest sample in the batch |
 | LM shift | `tokens` | `input_tokens`, `output_tokens` | `input_tokens = tokens[:, :-1]`, `output_tokens = tokens[:, 1:]` |
 | Forward pass | `input_tokens` | `logits` | decoder-only Transformer outputs `(B, T-1, vocab_size)` |
@@ -99,7 +100,7 @@ flowchart TD
 | Tensor | Shape | Meaning |
 | --- | --- | --- |
 | raw sample | one `input_ids` list | tokenized LMX sequence from the HuggingFace dataset |
-| training window | up to `1024` tokens | after sliding-window expansion or deterministic prefix crop |
+| evaluation window | up to `1024` tokens | after sliding-window expansion with overlap-aware loss masking |
 | `tokens` | `(batch_size, seq_len)` | batch after dynamic padding |
 | `input_tokens` | `(batch_size, seq_len - 1)` | decoder input tokens |
 | `output_tokens` | `(batch_size, seq_len - 1)` | next-token labels |
@@ -208,11 +209,11 @@ Additional notes:
 ### Final Result
 
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.8351`
-  - perplexity: `6.2658`
-  - token accuracy: `0.5909`
-  - top-5 accuracy: `0.7873`
-- evaluated tokens: `3,189,336`
+  - CE loss: `1.8128`
+  - perplexity: `6.1277`
+  - token accuracy: `0.5972`
+  - top-5 accuracy: `0.7900`
+- evaluated tokens: `4,416,152`
 - best checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
 - latest checkpoint: `artifacts/pretrained_decoder_rd_best.pt`
 - actual stop condition: time-budget stop at step `63952` with best step `61500`
@@ -224,6 +225,7 @@ Additional notes:
 Note:
 
 - the final reported numbers above are the full-validation metrics over the complete validation split
+- overlapping validation windows use loss masking so that each target token is counted exactly once
 - training still selects checkpoints by validation cross-entropy; the extra metrics are for diagnosis and comparison
 - this recommended result comes from a fully reproducible from-scratch run using `configs/pretrain_rd_best.yaml`
 

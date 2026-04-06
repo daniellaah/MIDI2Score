@@ -241,6 +241,8 @@ def evaluate_decoder_language_model_metrics(
             logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
             flat_targets = batch.output_tokens.reshape(-1)
             valid_mask = flat_targets.ne(pad_token_id)
+            if batch.loss_mask is not None:
+                valid_mask &= batch.loss_mask.reshape(-1)
             valid_targets = flat_targets[valid_mask]
             if valid_targets.numel() > 0:
                 flat_logits = logits.reshape(-1, logits.size(-1))[valid_mask]
