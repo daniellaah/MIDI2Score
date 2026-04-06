@@ -190,3 +190,32 @@ Recommendation:
 - none of the tested learning rates improved on the `stride=512` reference
 - the `rd` sliding-window branch still looks strongest at the current reference configuration
 - if we continue this branch, the next batch should change a different knob rather than keep narrowing learning rate around the same point
+
+## Active Sliding-Window Batch-Size Batch
+
+Reference baseline:
+
+- experiment id: `EXP-RD-SLIDING-300-003`
+- setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`
+- best validation loss: `2.3037683321482296`
+
+Batch-size sweep:
+
+- `EXP-RD-SLIDING-300-010`
+  - `training.batch_size=6`
+  - best validation loss: `3.342595467472292`
+  - classification: worse
+- `EXP-RD-SLIDING-300-011`
+  - `training.batch_size=12`
+  - best validation loss: `3.4011293977525017`
+  - classification: worse
+- `EXP-RD-SLIDING-300-012`
+  - `training.batch_size=16`
+  - best validation loss: `2.998826434264549`
+  - classification: worse
+
+Recommendation:
+
+- all tested batch sizes are clearly worse than the `stride=512` reference
+- the `rd` sliding-window branch does not currently look promising under batch-size tuning alone
+- if we continue, the next batch should change a different knob rather than expand the batch-size sweep
