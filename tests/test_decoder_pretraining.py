@@ -6,6 +6,7 @@ import torch
 
 from midi2score.data import (
     HuggingFaceLanguageModelDataset,
+    LanguageModelBatch,
     LanguageModelDataConfig,
     LengthBucketBatchSampler,
     build_language_model_dataloader,
@@ -81,6 +82,26 @@ def test_training_random_crop_changes_across_repeated_accesses() -> None:
     assert first_draws == second_draws
 
 
+def test_no_truncation_keeps_long_sequence_length() -> None:
+    config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=None,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+    )
+    dataset = HuggingFaceLanguageModelDataset(config)
+    long_index = next(
+        index
+        for index in range(len(dataset.dataset))
+        if len(dataset.dataset[index]["input_ids"]) > 2048
+    )
+
+    example = dataset[long_index]
+
+    assert len(example["tokens"]) == len(dataset.dataset[long_index]["input_ids"])
+
+
 def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
     config = LanguageModelDataConfig(
         dataset_path="data/huggingface",
@@ -133,12 +154,42 @@ def test_length_bucket_batch_sampler_groups_examples_by_length() -> None:
         drop_last=False,
         seed=23,
         bucket_size_multiplier=config.bucket_size_multiplier,
+        shuffle=True,
     )
 
     batch_indices = next(iter(sampler))
     lengths = [dataset.sequence_length(index) for index in batch_indices]
 
     assert lengths == sorted(lengths, reverse=True)
+
+
+def test_token_budget_batch_sampler_respects_max_tokens() -> None:
+    config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=None,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+        length_bucketing=True,
+        max_tokens_per_batch=4096,
+        bucket_size_multiplier=8,
+    )
+    dataset = HuggingFaceLanguageModelDataset(config)
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=None,
+        max_tokens_per_batch=config.max_tokens_per_batch,
+        drop_last=False,
+        seed=23,
+        bucket_size_multiplier=config.bucket_size_multiplier,
+        shuffle=True,
+    )
+
+    batch_indices = next(iter(sampler))
+    lengths = [dataset.sequence_length(index) for index in batch_indices]
+
+    padded_tokens = max(lengths) * len(lengths)
+    assert padded_tokens <= config.max_tokens_per_batch or len(lengths) == 1
 
 
 def test_decoder_language_model_forward_produces_vocab_logits() -> None:
@@ -154,42 +205,30 @@ def test_decoder_language_model_forward_produces_vocab_logits() -> None:
     )
 
 
-def test_decoder_language_model_supports_learned_positional_encoding() -> None:
-    model_config, batch = build_small_real_batch()
-    model_config = DecoderLanguageModelConfig(
-        **{
-            **model_config.to_dict(),
-            "position_encoding_type": "learned",
-        }
+def test_validation_bucketing_is_deterministic_without_shuffle() -> None:
+    config = LanguageModelDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=64,
+        tokenizer_path="data/tokenizer_rd.json",
+        random_crop=False,
+        length_bucketing=True,
+        bucket_size_multiplier=8,
     )
-    model = TransformerDecoderLM(model_config)
-
-    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-
-    assert logits.shape == (
-        batch.input_tokens.size(0),
-        batch.input_tokens.size(1),
-        model_config.vocab_size,
+    dataset = HuggingFaceLanguageModelDataset(config)
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=4,
+        drop_last=False,
+        seed=23,
+        bucket_size_multiplier=config.bucket_size_multiplier,
+        shuffle=False,
     )
 
+    first_pass = list(iter(sampler))
+    second_pass = list(iter(sampler))
 
-def test_decoder_language_model_supports_alibi_positional_bias() -> None:
-    model_config, batch = build_small_real_batch()
-    model_config = DecoderLanguageModelConfig(
-        **{
-            **model_config.to_dict(),
-            "position_encoding_type": "alibi",
-        }
-    )
-    model = TransformerDecoderLM(model_config)
-
-    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-
-    assert logits.shape == (
-        batch.input_tokens.size(0),
-        batch.input_tokens.size(1),
-        model_config.vocab_size,
-    )
+    assert first_pass == second_pass
 
 
 def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
@@ -292,6 +331,66 @@ def test_evaluate_decoder_language_model_metrics_returns_expected_fields() -> No
     assert 0.0 <= metrics.top5_accuracy <= 1.0
     assert metrics.top5_accuracy >= metrics.token_accuracy
     assert metrics.evaluated_tokens > 0
+
+
+def test_evaluate_decoder_language_model_metrics_uses_token_weighted_loss() -> None:
+    class FixedModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.batch_logits = [
+                torch.tensor(
+                    [[[4.0, 0.0], [0.0, 4.0]]],
+                    dtype=torch.float32,
+                ),
+                torch.tensor(
+                    [[[4.0, 0.0], [4.0, 0.0], [4.0, 0.0], [0.0, 4.0]]],
+                    dtype=torch.float32,
+                ),
+            ]
+            self.index = 0
+
+        def eval(self):
+            return self
+
+        def forward(self, input_tokens, *, padding_mask=None):
+            logits = self.batch_logits[self.index]
+            self.index += 1
+            return logits
+
+    batches = [
+        LanguageModelBatch(
+            input_tokens=torch.tensor([[1, 2]], dtype=torch.long),
+            output_tokens=torch.tensor([[0, 1]], dtype=torch.long),
+            padding_mask=torch.zeros((1, 2), dtype=torch.bool),
+        ),
+        LanguageModelBatch(
+            input_tokens=torch.tensor([[1, 2, 3, 4]], dtype=torch.long),
+            output_tokens=torch.tensor([[0, 0, 0, 1]], dtype=torch.long),
+            padding_mask=torch.zeros((1, 4), dtype=torch.bool),
+        ),
+    ]
+
+    metrics = evaluate_decoder_language_model_metrics(
+        FixedModel(),
+        batches,
+        pad_token_id=99,
+        device="cpu",
+    )
+
+    loss_a = torch.nn.functional.cross_entropy(
+        torch.tensor([[4.0, 0.0], [0.0, 4.0]]),
+        torch.tensor([0, 1]),
+        reduction="sum",
+    )
+    loss_b = torch.nn.functional.cross_entropy(
+        torch.tensor([[4.0, 0.0], [4.0, 0.0], [4.0, 0.0], [0.0, 4.0]]),
+        torch.tensor([0, 0, 0, 1]),
+        reduction="sum",
+    )
+    expected_loss = float((loss_a + loss_b) / 6)
+
+    assert metrics.loss == pytest.approx(expected_loss)
+    assert metrics.evaluated_tokens == 6
 
 
 def test_decoder_dropout_is_active_only_in_train_mode() -> None:

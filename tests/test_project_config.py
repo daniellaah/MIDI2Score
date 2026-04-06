@@ -12,7 +12,7 @@ def test_load_decoder_pretrain_config_reads_baseline_yaml() -> None:
     assert config.model.vocab_size == 5000
     assert config.data.dataset_path == "data/huggingface"
     assert config.training.num_steps == 16000
-    assert config.training.resume_checkpoint_path == "artifacts/pretrained_decoder_baseline.pt"
+    assert config.training.resume_checkpoint_path is None
 
 
 def test_load_decoder_pretrain_config_requires_mapping_sections(tmp_path: Path) -> None:

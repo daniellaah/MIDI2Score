@@ -33,6 +33,6 @@ training:
   device: auto
   save_checkpoint_path: artifacts/pretrained_decoder_baseline.pt
   save_best_checkpoint_path: artifacts/pretrained_decoder_best.pt
-  resume_checkpoint_path: artifacts/pretrained_decoder_baseline.pt
+  resume_checkpoint_path: null
   csv_log_path: logs/pretrain_rd.csv
   tensorboard_log_dir: logs/tensorboard/pretrain_rd

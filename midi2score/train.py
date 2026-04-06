@@ -231,7 +231,6 @@ def evaluate_decoder_language_model_metrics(
 ) -> DecoderEvaluationMetrics:
     model.eval()
     total_loss = 0.0
-    total_batches = 0
     total_valid_tokens = 0
     total_correct_tokens = 0
     total_top5_correct_tokens = 0
@@ -240,19 +239,18 @@ def evaluate_decoder_language_model_metrics(
         for batch_index, batch in enumerate(loader, start=1):
             batch = batch.to(device)
             logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-            loss = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
-                batch.output_tokens.reshape(-1),
-                ignore_index=pad_token_id,
-            )
-            total_loss += float(loss.item())
-            total_batches += 1
-
             flat_targets = batch.output_tokens.reshape(-1)
             valid_mask = flat_targets.ne(pad_token_id)
             valid_targets = flat_targets[valid_mask]
             if valid_targets.numel() > 0:
                 flat_logits = logits.reshape(-1, logits.size(-1))[valid_mask]
+                total_loss += float(
+                    F.cross_entropy(
+                        flat_logits,
+                        valid_targets,
+                        reduction="sum",
+                    ).item()
+                )
                 predictions = flat_logits.argmax(dim=-1)
                 topk = flat_logits.topk(k=min(5, flat_logits.size(-1)), dim=-1).indices
                 total_valid_tokens += int(valid_targets.numel())
@@ -263,7 +261,7 @@ def evaluate_decoder_language_model_metrics(
             if num_batches is not None and batch_index >= num_batches:
                 break
 
-    average_loss = total_loss / total_batches
+    average_loss = total_loss / total_valid_tokens
     return DecoderEvaluationMetrics(
         loss=average_loss,
         perplexity=float(torch.exp(torch.tensor(average_loss)).item()),
@@ -489,7 +487,7 @@ def _validate_setup(
     model_config: DecoderLanguageModelConfig,
     data_config: LanguageModelDataConfig,
 ) -> None:
-    if model_config.max_length < data_config.max_length:
+    if data_config.max_length is not None and model_config.max_length < data_config.max_length:
         raise ValueError("model.max_length must be >= data.max_length.")
     tokenizer_vocab_size = data_config.tokenizer_vocab_size()
     if tokenizer_vocab_size is not None and tokenizer_vocab_size != model_config.vocab_size:

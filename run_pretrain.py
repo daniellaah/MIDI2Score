@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 from midi2score.config import load_decoder_pretrain_config
-from midi2score.research import parse_override_value, run_research_experiment
 from midi2score.train import run_decoder_pretraining_loop
 
 
@@ -76,6 +75,8 @@ def main() -> None:
             print(f"saved best checkpoint to {result.best_checkpoint_path}")
         return
 
+    from midi2score.research import run_research_experiment
+
     summary = run_research_experiment(
         base_config_path=args.config,
         experiment_id=args.experiment_id,
@@ -95,8 +96,28 @@ def _parse_overrides(pairs: list[str]) -> dict[str, object]:
         key, raw_value = pair.split("=", maxsplit=1)
         if not key:
             raise ValueError(f"Override key must be non-empty, got {pair!r}.")
-        overrides[key] = parse_override_value(raw_value)
+        overrides[key] = _parse_override_value(raw_value)
     return overrides
+
+
+def _parse_override_value(raw_value: str) -> object:
+    lowered = raw_value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered in {"none", "null"}:
+        return None
+
+    try:
+        return int(raw_value)
+    except ValueError:
+        pass
+
+    try:
+        return float(raw_value)
+    except ValueError:
+        return raw_value
 
 
 if __name__ == "__main__":

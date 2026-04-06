@@ -28,8 +28,8 @@ class DecoderLanguageModelConfig:
             raise ValueError("d_model must be divisible by nhead.")
         if self.activation not in {"relu", "gelu"}:
             raise ValueError("activation must be relu or gelu.")
-        if self.position_encoding_type not in {"sinusoidal", "learned", "alibi"}:
-            raise ValueError("position_encoding_type is unsupported.")
+        if self.position_encoding_type != "sinusoidal":
+            raise ValueError("position_encoding_type must be sinusoidal.")
 
     def to_dict(self) -> dict[str, int | float | str]:
         return asdict(self)
@@ -51,33 +51,10 @@ class SinusoidalPositionalEncoding(nn.Module):
         return self.encoding[:, : tokens.size(1)]
 
 
-class LearnedPositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_length: int) -> None:
-        super().__init__()
-        self.embedding = nn.Embedding(max_length, d_model)
-
-    def forward(self, tokens: Tensor) -> Tensor:
-        positions = torch.arange(tokens.size(1), device=tokens.device).unsqueeze(0)
-        return self.embedding(positions)
-
-
-class ZeroPositionalEncoding(nn.Module):
-    def __init__(self, d_model: int) -> None:
-        super().__init__()
-        self.d_model = d_model
-
-    def forward(self, tokens: Tensor) -> Tensor:
-        return torch.zeros((1, tokens.size(1), self.d_model), device=tokens.device)
-
-
 def build_positional_encoding(encoding_type: str, d_model: int, max_length: int) -> nn.Module:
-    if encoding_type == "sinusoidal":
-        return SinusoidalPositionalEncoding(d_model, max_length)
-    if encoding_type == "learned":
-        return LearnedPositionalEncoding(d_model, max_length)
-    if encoding_type == "alibi":
-        return ZeroPositionalEncoding(d_model)
-    raise ValueError(f"Unsupported positional encoding {encoding_type!r}.")
+    if encoding_type != "sinusoidal":
+        raise ValueError(f"Unsupported positional encoding {encoding_type!r}.")
+    return SinusoidalPositionalEncoding(d_model, max_length)
 
 
 def build_causal_mask(sequence_length: int, device: torch.device | str) -> Tensor:
@@ -87,33 +64,8 @@ def build_causal_mask(sequence_length: int, device: torch.device | str) -> Tenso
     )
 
 
-def build_alibi_causal_mask(
-    *,
-    sequence_length: int,
-    num_heads: int,
-    batch_size: int,
-    device: torch.device | str,
-) -> Tensor:
-    slopes = torch.tensor(
-        [2 ** (-(8.0 * (index + 1) / num_heads)) for index in range(num_heads)],
-        dtype=torch.float32,
-        device=device,
-    ).view(num_heads, 1, 1)
-    positions = torch.arange(sequence_length, device=device, dtype=torch.float32)
-    distance = (positions[:, None] - positions[None, :]).clamp_min(0.0)
-    future = positions[:, None] < positions[None, :]
-    bias = (-slopes * distance).masked_fill(future.unsqueeze(0), float("-inf"))
-    return bias.repeat_interleave(batch_size, dim=0)
-
-
 def _activation(name: str):
     return torch.relu if name == "relu" else torch.nn.functional.gelu
-
-
-def _normalize_padding_mask(mask: Tensor | None, attn_mask: Tensor) -> Tensor | None:
-    if mask is None or attn_mask.dtype == torch.bool:
-        return mask
-    return mask.to(dtype=attn_mask.dtype).masked_fill(mask, float("-inf"))
 
 
 class TransformerDecoderLayer(nn.Module):
@@ -133,21 +85,13 @@ class TransformerDecoderLayer(nn.Module):
             dropout=dropout,
             batch_first=True,
         )
-        self.cross_attn = nn.MultiheadAttention(
-            embed_dim=d_model,
-            num_heads=nhead,
-            dropout=dropout,
-            batch_first=True,
-        )
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
         self.dropout = nn.Dropout(dropout)
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
         self.activation = _activation(activation)
 
     def forward(
@@ -156,8 +100,6 @@ class TransformerDecoderLayer(nn.Module):
         *,
         tgt_causal_mask: Tensor,
         tgt_padding_mask: Tensor | None = None,
-        memory: Tensor | None = None,
-        memory_padding_mask: Tensor | None = None,
     ) -> Tensor:
         x = tgt
         self_attn_output = self.self_attn(
@@ -165,21 +107,12 @@ class TransformerDecoderLayer(nn.Module):
             x,
             x,
             attn_mask=tgt_causal_mask,
-            key_padding_mask=_normalize_padding_mask(tgt_padding_mask, tgt_causal_mask),
+            key_padding_mask=tgt_padding_mask,
             need_weights=False,
         )[0]
         x = self.norm1(x + self.dropout1(self_attn_output))
-        if memory is not None:
-            cross_attn_output = self.cross_attn(
-                x,
-                memory,
-                memory,
-                key_padding_mask=_normalize_padding_mask(memory_padding_mask, tgt_causal_mask),
-                need_weights=False,
-            )[0]
-            x = self.norm2(x + self.dropout2(cross_attn_output))
         ff_output = self.linear2(self.dropout(self.activation(self.linear1(x))))
-        return self.norm3(x + self.dropout3(ff_output))
+        return self.norm2(x + self.dropout2(ff_output))
 
 
 class TransformerDecoderStack(nn.Module):
@@ -210,8 +143,6 @@ class TransformerDecoderStack(nn.Module):
         *,
         tgt_causal_mask: Tensor,
         tgt_padding_mask: Tensor | None = None,
-        memory: Tensor | None = None,
-        memory_padding_mask: Tensor | None = None,
     ) -> Tensor:
         x = tgt
         for layer in self.layers:
@@ -219,8 +150,6 @@ class TransformerDecoderStack(nn.Module):
                 x,
                 tgt_causal_mask=tgt_causal_mask,
                 tgt_padding_mask=tgt_padding_mask,
-                memory=memory,
-                memory_padding_mask=memory_padding_mask,
             )
         return self.norm(x)
 
@@ -262,15 +191,7 @@ class TransformerDecoderLM(nn.Module):
 
     def forward(self, input_tokens: Tensor, *, padding_mask: Tensor | None = None) -> Tensor:
         decoded_inputs = self.decode(input_tokens)
-        if self.config.position_encoding_type == "alibi":
-            causal_mask = build_alibi_causal_mask(
-                sequence_length=input_tokens.size(1),
-                num_heads=self.config.nhead,
-                batch_size=input_tokens.size(0),
-                device=input_tokens.device,
-            )
-        else:
-            causal_mask = build_causal_mask(input_tokens.size(1), device=input_tokens.device)
+        causal_mask = build_causal_mask(input_tokens.size(1), device=input_tokens.device)
         hidden_states = self.decoder(
             decoded_inputs,
             tgt_causal_mask=causal_mask,
