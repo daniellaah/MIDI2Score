@@ -2310,3 +2310,32 @@ Recommendation:
 - none of the tested learning rates improved on the `batch_size=16` reference
 - `batch_size=16` remains the strongest setting in this local sweep
 - if we continue, the next batch should change a different knob rather than keep narrowing learning rate around the same point
+
+## Active Sliding-Window Warmup Sweep on Batch-Size-16 Reference
+
+Reference baseline:
+
+- experiment id: `EXP-RD-SLIDING-BASELINE-300-016`
+- setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`, `training.batch_size=16`, `training.learning_rate=6e-4`, `training.warmup_steps=500`
+- best validation loss: `3.043229905482916`
+
+Warmup sweep:
+
+- `EXP-RD-SLIDING-BASELINE-300-020`
+  - `training.warmup_steps=250`
+  - best validation loss: `3.7396431782525905`
+  - classification: worse
+- `EXP-RD-SLIDING-BASELINE-300-021`
+  - `training.warmup_steps=1000`
+  - best validation loss: `4.503890004876188`
+  - classification: worse
+- `EXP-RD-SLIDING-BASELINE-300-022`
+  - `training.warmup_steps=2000`
+  - best validation loss: `5.426967218723017`
+  - classification: worse
+
+Recommendation:
+
+- none of the tested warmup lengths improved on the `warmup_steps=500` reference
+- the batch-size-16 reference remains the strongest point in this local sliding-window region
+- if we continue, the next batch should change a different knob rather than keep narrowing warmup around the same point
