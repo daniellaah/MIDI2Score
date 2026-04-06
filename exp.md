@@ -76,3 +76,32 @@ Recommendation:
 
 - this sweep suggests the no-truncation branch is still under-optimized and does not like the current learning-rate range
 - next batch should try a different training knob rather than pushing learning rate further, for example `batch_size` around the baseline or a smaller `max_tokens_per_batch` neighborhood around `8192`
+
+## Active No-Truncation Token-Budget Neighborhood Batch
+
+Reference baseline:
+
+- experiment id: `EXP-RD-NOTRUNC-BASELINE-300-001`
+- setup: `max_length=null`, `length_bucketing=true`, `max_tokens_per_batch=8192`
+- best validation loss: `5.336567202039044`
+
+Second token-budget neighborhood sweep:
+
+- `EXP-RD-NOTRUNC-BASELINE-300-008`
+  - `data.max_tokens_per_batch=6144`
+  - best validation loss: `6.989866653195414`
+  - classification: worse
+- `EXP-RD-NOTRUNC-BASELINE-300-009`
+  - `data.max_tokens_per_batch=10240`
+  - best validation loss: `6.529763286742806`
+  - classification: worse
+- `EXP-RD-NOTRUNC-BASELINE-300-010`
+  - `data.max_tokens_per_batch=12288`
+  - best validation loss: `6.311214550416019`
+  - classification: worse
+
+Recommendation:
+
+- the local token-budget search around `8192` is still clearly worse than the baseline
+- this no-truncation branch does not currently look worth extending further on token budget alone
+- if we continue, the next batch should change a different knob, such as `batch_size`, or revisit the validation/training schedule rather than pushing token budget again
