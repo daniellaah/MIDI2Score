@@ -11,7 +11,7 @@ Current recommended checkpoints:
   - checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
 - `full`:
   - config: `configs/pretrain_full_best.yaml`
-  - checkpoint: `artifacts/research/EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long/best.pt`
+  - checkpoint: `artifacts/pretrained_decoder_full_best_best.pt`
 
 Recommended usage:
 

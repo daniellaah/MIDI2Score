@@ -10,6 +10,7 @@ __pycache__/
 /logs/
 /data/
 /configs/research/
+archives/
 docs/*
 !docs/dev.md
 !docs/decoder_pretrain.md

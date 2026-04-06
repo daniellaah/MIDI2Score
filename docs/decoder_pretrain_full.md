@@ -65,8 +65,8 @@ Last updated: 2026-03-31
   - top-5 accuracy: `0.7480`
 - final step: `223000`
 - elapsed seconds: `2293.68`
-- best checkpoint: `artifacts/research/EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long/best.pt`
-- latest checkpoint: `artifacts/research/EXP-FULL-RDREF-003_sliding160_dmodel256_ff1024_lr6e4_linearwarmup_bs8_long/latest.pt`
+- best checkpoint: `artifacts/pretrained_decoder_full_best_best.pt`
+- latest checkpoint: `artifacts/pretrained_decoder_full_best.pt`
 
 ## Long-Context Backup Result
 
@@ -81,11 +81,11 @@ Last updated: 2026-03-31
   - `warmup_steps = 500`
   - `min_lr_ratio = 0.1`
   - best validation loss: `2.1344317700713873`
-  - best checkpoint: `artifacts/research/EXP-FULL-RDREF-010_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_long/best.pt`
+  - best checkpoint: `archives/artifacts/research/EXP-FULL-RDREF-010_crop1024_nobucket_dmodel256_ff1024_lr6e4_bs12_linearwarmup_long/best.pt`
 
 - older long-context branch with `length_bucketing = true`:
   - best validation loss: `2.401298375800252`
-  - best checkpoint: `artifacts/research/EXP-FULL-LONGCTX-007_crop1024_bucket_dmodel256_ff1024_bs8_long/best.pt`
+  - best checkpoint: `archives/artifacts/research/EXP-FULL-LONGCTX-007_crop1024_bucket_dmodel256_ff1024_bs8_long/best.pt`
 
 Interpretation:
 
