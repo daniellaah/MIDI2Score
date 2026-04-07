@@ -166,17 +166,22 @@ Promotion rule:
 
 ## Subagent Pattern
 
-Subagents are useful for bounded, parallel sweeps.
+Subagents are useful for bounded, structured sweeps.
 
 Recommended use:
 
-- one subagent owns one sweep family
-  - example: batch-size sweep
-  - example: learning-rate sweep
+- one subagent may own one sweep family
 - each subagent should use one shared baseline and vary only one knob
 - do not let multiple subagents write overlapping code or rewrite docs independently
+- on a single local machine, **only one actual training run may execute at a time**
+- if wall-clock budget is part of the comparison, parallel training is invalid because runs compete for the same hardware and become unfair
+- subagents may still be used for:
+  - planning the next sweep
+  - preparing commands
+  - summarizing finished runs
+  - reading and updating docs after runs complete
 
-Good parallel batches:
+Good sequential batches:
 
 - `batch_size` sweep with `3` candidates
 - `learning_rate` sweep with `3` candidates
@@ -184,6 +189,7 @@ Good parallel batches:
 
 Avoid parallelizing:
 
+- any training runs whose results are compared by wall-clock budget
 - long confirmation runs that may need result-dependent follow-up
 - overlapping sweeps that compare against different baselines
 
