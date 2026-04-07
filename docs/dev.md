@@ -179,7 +179,8 @@ So the current setup is:
 - `program.md`
   - instructions for an agent doing autotuning
 
-- `exp.md`
+- `docs/decoder_pretrain_rd_exp.md`
+- `docs/decoder_pretrain_full_exp.md`
   - experiment history and conclusions
 
 ### 4.4 Config + Entrypoint
@@ -251,7 +252,7 @@ Best verified baseline result so far:
 
 - best validation loss `3.6623`
 
-There is also a tracked comparison run with `max_length=512`, and it is currently recorded as `no clear effect` in `exp.md`.
+There is also a tracked comparison run with `max_length=512`, and it is currently recorded in the `rd` experiment summary.
 
 ## 7. How To Run
 
@@ -357,7 +358,7 @@ Then inspect tests:
 
 If work continues on decoder pretraining, the most natural next steps are:
 
-1. keep running single-variable experiments and record them in `exp.md`
+1. keep running single-variable experiments and record them in the appropriate `rd` or `full` experiment summary
 2. tune width / depth / dropout / learning rate with `run_pretrain.py --experiment-id ...`
 3. use 300-second timed baselines when the budget policy changes
 4. consider a separate full-dataset baseline once rd tuning stabilizes

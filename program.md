@@ -11,7 +11,9 @@ Primary metric:
 - validation cross-entropy loss
 - lower is better
 
-Current reference points from [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md):
+Current reference points from:
+- [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md)
+- [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md)
 
 - historical best step-based run: `d_model=128`, `16000` steps, best validation loss `2.9924`
 - current best 180-second timed run: `d_model=128`, `dim_feedforward=512`, `dropout=0.0`, `learning_rate=7.5e-4`, best validation loss `2.7349`
@@ -25,7 +27,8 @@ Important:
 
 ## Important Files
 
-- [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md): experiment history and decisions
+- [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md): `rd` experiment history and decisions
+- [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md): `full` experiment history and decisions
 - [`configs/pretrain_baseline.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_baseline.yaml): current baseline config
 - [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py): single entrypoint for direct training and managed experiments
 
@@ -56,7 +59,7 @@ Preferred knobs:
   - `artifacts/research/<experiment_id>/`
   - `logs/research/<experiment_id>.csv`
   - `logs/tensorboard/research/<experiment_id>/`
-- Before choosing a new change, read [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md) and avoid repeating experiments.
+- Before choosing a new change, read both [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) and [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md) and avoid repeating experiments.
 - Each experiment summary must record the git commit and branch.
 
 ## Decision Rule
@@ -78,12 +81,14 @@ Classify outcomes this way:
 
 ## Required Workflow
 
-1. Read [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md).
+1. Read [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) and [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md).
 2. Choose one or more new experiments for the same batch.
 3. Commit code changes before running the batch if the worktree is dirty.
 4. Run the batch with [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) and `--experiment-id`.
 5. Read each generated `summary.json`.
-6. Update [`exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/exp.md) with:
+6. Update the appropriate experiment summary with:
+   - [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) for `rd`
+   - [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md) for `full`
    - a new `EXP-xxx` block
    - what changed
    - the result
