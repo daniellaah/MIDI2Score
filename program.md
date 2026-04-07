@@ -2,121 +2,219 @@
 
 This file defines how an agent should run automatic tuning for decoder pretraining.
 
+The current priority is **`rd` decoder pretraining only**.
+
 ## Goal
 
-Improve the decoder-only language model on the rd dataset.
+Improve the decoder-only language model on the `rd` dataset without changing the task definition.
 
 Primary metric:
 
 - validation cross-entropy loss
 - lower is better
 
-Current reference points from:
-- [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md)
-- [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md)
+Secondary metrics for promotion candidates:
 
-- historical best step-based run: `d_model=128`, `16000` steps, best validation loss `2.9924`
-- current best 180-second timed run: `d_model=128`, `dim_feedforward=512`, `dropout=0.0`, `learning_rate=7.5e-4`, best validation loss `2.7349`
+- perplexity
+- token accuracy
+- top-5 accuracy
 
-Important:
+## Current Official `rd` Best
 
-- historical results before this document update were compared by fixed step budget
-- new automatic experiments must be compared by wall-clock budget instead
-- do not treat the old step-based numbers as a fair timed baseline
-- first create and record a timed baseline before making strong claims about new timed runs
+Always start from the current official `rd` recipe unless a new experiment explicitly changes one knob.
+
+- config: [`configs/pretrain_rd_best.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_rd_best.yaml)
+- experiment summary: [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md)
+- method doc: [`docs/decoder_pretrain_rd.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd.md)
+
+Current official recipe:
+
+- dataset: `data/huggingface`
+- tokenizer: `data/tokenizer_rd.json`
+- `max_length = 1024`
+- training: full-coverage sliding windows
+- `sliding_window_stride = 512`
+- validation/test: full-coverage sliding-window evaluation
+- `d_model = 256`
+- `nhead = 4`
+- `num_layers = 2`
+- `dim_feedforward = 1024`
+- `dropout = 0.0`
+- `batch_size = 16`
+- `learning_rate = 6e-4`
+- scheduler: `linear`
+- `warmup_steps = 500`
+- length bucketing: `false`
+
+Current official full-validation metrics:
+
+- CE loss: `1.8092`
+- perplexity: `6.1053`
+- token accuracy: `0.5988`
+- top-5 accuracy: `0.7908`
+
+## Comparison Budget
+
+For new tuning on the current `rd` family:
+
+- use **`600s`** as the default comparison budget
+- compare challenger runs only against a baseline with the **same budget**
+- do not mix `300s`, `600s`, `7200s`, and `10800s` results in one decision
+
+Use these budget tiers:
+
+- `600s`: baseline building and local hyperparameter search
+- `1800s`: follow-up only for clearly useful `600s` winners
+- `7200s` or more: confirmation / promotion runs only
 
 ## Important Files
 
 - [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md): `rd` experiment history and decisions
-- [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md): `full` experiment history and decisions
-- [`configs/pretrain_baseline.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_baseline.yaml): current baseline config
-- [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py): single entrypoint for direct training and managed experiments
+- [`docs/decoder_pretrain_rd.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd.md): current `rd` method description
+- [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md): `full` reference only; do not tune `full` unless explicitly requested
+- [`configs/pretrain_rd_best.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_rd_best.yaml): official `rd` best config
+- [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py): training entrypoint
 
 ## Allowed Changes
 
 Only change decoder-pretraining experiment configs unless there is a clear blocker.
 
-Preferred knobs:
+Preferred knobs for the current `rd` family:
+
+- `training.batch_size`
+- `training.learning_rate`
+- `training.warmup_steps`
+- `training.weight_decay`
+- `training.grad_clip_norm`
+- `training.label_smoothing`
+- `data.sliding_window_stride`
+- `training.max_duration_seconds`
+
+Second-tier knobs:
 
 - `model.d_model`
-- `model.num_layers`
 - `model.dim_feedforward`
-- `model.dropout`
-- `training.learning_rate`
-- `training.batch_size`
+- `model.num_layers`
 - `data.max_length`
 - matching `model.max_length`
+
+## Current Negative Priors
+
+Do not re-run these directions unless there is a new explicit hypothesis:
+
+- `2048` context on `rd`
+- no-truncation with `max_tokens_per_batch`
+- length bucketing on the official `rd` branch
+- learned positional encoding
+- ALiBi
+- RoPE
+- flash attention backend
+- deeper 3-layer variants
+
+These are not theoretical bans; they are current low-priority directions with negative evidence.
 
 ## Constraints
 
 - Change one meaningful variable at a time.
 - Keep dataset fixed to `data/huggingface`.
 - Keep tokenizer fixed to `data/tokenizer_rd.json`.
-- Do not overwrite baseline checkpoints or baseline logs.
+- Do not overwrite official checkpoints or official logs.
 - Start managed experiments from a clean git worktree.
 - Use [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) with `--experiment-id` so outputs land under:
   - `configs/research/<experiment_id>.yaml`
   - `artifacts/research/<experiment_id>/`
   - `logs/research/<experiment_id>.csv`
   - `logs/tensorboard/research/<experiment_id>/`
-- Before choosing a new change, read both [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) and [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md) and avoid repeating experiments.
+- Read [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) before proposing new work.
 - Each experiment summary must record the git commit and branch.
 
 ## Decision Rule
 
-Compare against the strongest clean baseline that matches the same training budget.
+Compare against the strongest clean baseline that matches the same:
 
-For new managed runs:
+- dataset branch
+- model family
+- validation policy
+- time budget
 
-- use a wall-clock budget, not a step budget
-- default timed budget is now `300` seconds
-- because the budget changed from `180` to `300` seconds, establish a fresh 300-second baseline before promoting new winners
-- until then, old 180-second results are only rough context for choosing search directions
+For the current `rd` family, use these thresholds:
 
-Classify outcomes this way:
+- `useful`: improves validation CE by at least `0.03`
+- `no clear effect`: within `0.03` of the reference
+- `worse`: degrades validation CE by more than `0.03`
 
-- `useful`: improves validation loss by at least `0.03`
-- `no clear effect`: within `0.03` of reference
-- `worse`: degrades validation loss by more than `0.03`
+Promotion rule:
+
+- do **not** promote a new official best from a single short-budget result
+- a promotion candidate should either:
+  - win again in a second run at the same budget, or
+  - win at a longer confirmation budget
 
 ## Required Workflow
 
-1. Read [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) and [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md).
-2. Choose one or more new experiments for the same batch.
-3. Commit code changes before running the batch if the worktree is dirty.
-4. Run the batch with [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) and `--experiment-id`.
-5. Read each generated `summary.json`.
-6. Update the appropriate experiment summary with:
-   - [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) for `rd`
-   - [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md) for `full`
-   - a new `EXP-xxx` block
-   - what changed
-   - the result
-   - the conclusion
-7. Give a short recommendation for the next batch.
+1. Read [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md).
+2. Identify the current matching baseline for the target budget.
+3. Choose a small batch of experiments that each change only one meaningful variable relative to that baseline.
+4. Commit code changes before running the batch if the worktree is dirty.
+5. Run the batch with [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) and `--experiment-id`.
+6. Read each generated `summary.json`.
+7. Update [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) only if the batch changed:
+   - the official best
+   - a strong backup direction
+   - or an important negative lesson
+8. Give a short recommendation for the next batch.
 
-Batch rule:
+## Subagent Pattern
 
-- a single subagent may run multiple experiments in sequence
-- each experiment inside the batch must still change only one meaningful variable relative to the chosen reference config
+Subagents are useful for bounded, parallel sweeps.
+
+Recommended use:
+
+- one subagent owns one sweep family
+  - example: batch-size sweep
+  - example: learning-rate sweep
+- each subagent should use one shared baseline and vary only one knob
+- do not let multiple subagents write overlapping code or rewrite docs independently
+
+Good parallel batches:
+
+- `batch_size` sweep with `3` candidates
+- `learning_rate` sweep with `3` candidates
+- `warmup_steps` sweep with `3` candidates
+
+Avoid parallelizing:
+
+- long confirmation runs that may need result-dependent follow-up
+- overlapping sweeps that compare against different baselines
+
+## Recommended Search Order
+
+For the current `rd` family, tune in this order:
+
+1. baseline confirmation at `600s`
+2. `batch_size`
+3. `learning_rate`
+4. `warmup_steps`
+5. `weight_decay`
+6. `grad_clip_norm`
+7. `label_smoothing`
+8. `sliding_window_stride`
+9. only then reconsider structure changes
 
 ## Example Command
 
 ```bash
 uv run python run_pretrain.py \
-  --config configs/pretrain_baseline.yaml \
-  --experiment-id EXP-TIMED-300-001_best180_baseline \
-  --set model.d_model=128 \
-  --set model.dim_feedforward=512 \
-  --set model.dropout=0.0 \
-  --set training.learning_rate=0.00075 \
-  --set training.num_steps=1000000 \
-  --set training.max_duration_seconds=300 \
-  --note "300-second baseline with current best 180-second structure"
+  --config configs/pretrain_rd_best.yaml \
+  --experiment-id EXP-RD-TUNE600-BS12-001 \
+  --set training.batch_size=12 \
+  --set training.max_duration_seconds=600 \
+  --note "600s rd tuning sweep: batch_size 12 on current 1024 sliding baseline"
 ```
 
 ## Notes
 
-- `training.num_steps` still exists as a safety cap, but timed experiments should normally stop because of `training.max_duration_seconds`.
-- [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) now checks git cleanliness by default in managed experiment mode.
+- `training.num_steps` remains a safety cap; timed experiments should stop because of `training.max_duration_seconds`.
+- [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) checks git cleanliness by default in managed experiment mode.
 - Use `--allow-dirty-git` only for local smoke tests, not for managed research runs.
+- Keep this file aligned with [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md). If the official best changes, update both.
