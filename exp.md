@@ -2239,10 +2239,10 @@ Corrected full-coverage validation:
 - after fixing validation to use overlapping sliding windows with loss masking so that each target token is counted exactly once, the saved best checkpoint was re-evaluated on the full validation split
 - official `rd` best checkpoint:
   - path: `artifacts/pretrained_decoder_rd_best_best.pt`
-  - CE loss: `1.8128`
-  - perplexity: `6.1277`
-  - token accuracy: `0.5972`
-  - top-5 accuracy: `0.7900`
+  - CE loss: `1.8092`
+  - perplexity: `6.1053`
+  - token accuracy: `0.5988`
+  - top-5 accuracy: `0.7908`
   - evaluated tokens: `4,416,152`
 
 Main takeaway:
@@ -2252,6 +2252,7 @@ Main takeaway:
 - the official `rd` best config remains `configs/pretrain_rd_best.yaml`, but now with:
   - `random_crop=false`
   - `sliding_window_stride=512`
+  - `training.batch_size=16`
 - final reported `rd` metrics should use the corrected full-coverage validation procedure rather than prefix-only evaluation
 
 ## Active Sliding-Window Batch-Size Sweep on Clean Baseline 013
@@ -2339,3 +2340,39 @@ Recommendation:
 - none of the tested warmup lengths improved on the `warmup_steps=500` reference
 - the batch-size-16 reference remains the strongest point in this local sliding-window region
 - if we continue, the next batch should change a different knob rather than keep narrowing warmup around the same point
+
+## Sliding-Window Long-Budget Confirmation on Batch Size 16
+
+Primary long-budget run:
+
+- `EXP-RD-SLIDING-LONG-002_bs16`
+  - setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`, `training.batch_size=16`, `training.learning_rate=6e-4`
+  - budget: `7200s`, from scratch, full validation during training
+  - training-time best validation CE: `1.8102009990161188`
+  - full-validation metrics on the saved best checkpoint:
+    - CE loss: `1.8102`
+    - perplexity: `6.1117`
+    - token accuracy: `0.5978`
+    - top-5 accuracy: `0.7902`
+    - evaluated tokens: `4,416,152`
+  - classification: better than the previous official `rd` best, but only by a very small margin
+
+Confirmation run:
+
+- `EXP-RD-SLIDING-LONG-003_bs16_confirm`
+  - setup: `max_length=1024`, `random_crop=false`, `sliding_window_stride=512`, `training.batch_size=16`, `training.learning_rate=6e-4`
+  - budget: `7200s`, from scratch, full validation during training
+  - training-time best validation CE: `1.8091522898056243`
+  - full-validation metrics on the saved best checkpoint:
+    - CE loss: `1.8092`
+    - perplexity: `6.1053`
+    - token accuracy: `0.5988`
+    - top-5 accuracy: `0.7908`
+    - evaluated tokens: `4,416,152`
+  - classification: confirmed improvement
+
+Updated recommendation:
+
+- `batch_size=16` is now the official `rd` best setting for the `1024 + sliding_window_stride=512` branch
+- the official runnable config remains `configs/pretrain_rd_best.yaml`, but now with `training.batch_size=16`
+- the official best checkpoint is `artifacts/pretrained_decoder_rd_best_best.pt`, sourced from `EXP-RD-SLIDING-LONG-003_bs16_confirm`

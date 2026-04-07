@@ -9,6 +9,7 @@ Current recommended checkpoints:
 - `rd`:
   - config: `configs/pretrain_rd_best.yaml`
   - checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
+  - full-validation CE: `1.8092`
 - `full`:
   - config: `configs/pretrain_full_best.yaml`
   - checkpoint: `artifacts/pretrained_decoder_full_best_best.pt`

@@ -1,6 +1,6 @@
 # Decoder Pretraining
 
-Last updated: 2026-03-31
+Last updated: 2026-04-06
 
 ## Recommended Run At A Glance
 
@@ -22,7 +22,7 @@ Last updated: 2026-03-31
 - `dropout = 0.0`
 - `activation = relu`
 - positional encoding: `sinusoidal`
-- `batch_size = 8`
+- `batch_size = 16`
 - `learning_rate = 6e-4`
 - scheduler: `linear`
 - `warmup_steps = 500`
@@ -30,10 +30,10 @@ Last updated: 2026-03-31
 - continuation budget: `7200` seconds
 - final reported validation CE uses the full validation split
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.8128`
-  - perplexity: `6.1277`
-  - token accuracy: `0.5972`
-  - top-5 accuracy: `0.7900`
+  - CE loss: `1.8092`
+  - perplexity: `6.1053`
+  - token accuracy: `0.5988`
+  - top-5 accuracy: `0.7908`
 
 ## Final Recommended Model
 
@@ -189,7 +189,7 @@ Additional notes:
   - perplexity
   - token accuracy
   - top-5 accuracy
-- `batch_size = 8`
+- `batch_size = 16`
 - `learning_rate = 6e-4`
 - scheduler: `linear`
 - `warmup_steps = 500`
@@ -209,14 +209,14 @@ Additional notes:
 ### Final Result
 
 - full-validation metrics on the saved best checkpoint:
-  - CE loss: `1.8128`
-  - perplexity: `6.1277`
-  - token accuracy: `0.5972`
-  - top-5 accuracy: `0.7900`
+  - CE loss: `1.8092`
+  - perplexity: `6.1053`
+  - token accuracy: `0.5988`
+  - top-5 accuracy: `0.7908`
 - evaluated tokens: `4,416,152`
 - best checkpoint: `artifacts/pretrained_decoder_rd_best_best.pt`
 - latest checkpoint: `artifacts/pretrained_decoder_rd_best.pt`
-- actual stop condition: time-budget stop at step `63952` with best step `61500`
+- actual stop condition: time-budget stop at step `50100` with best step `49100`
 
 ### Loss Curves
 
@@ -247,9 +247,13 @@ Note:
 
 ### Batch Size 16
 
-- `batch_size = 16` looked promising in a `300s` smoke run on the older bucketing branch: best validation loss `2.5373`
-- the long-budget follow-up regressed to `2.0639`
-- conclusion: `batch_size = 16` is not promoted; `batch_size = 8` remains the stable choice
+- on the clean `1024 + sliding_window_stride=512` branch, `batch_size = 16` improved the `300s` baseline:
+  - `batch_size = 8`: `3.1823`
+  - `batch_size = 16`: `3.0432`
+- two independent `7200s` from-scratch runs then confirmed the gain:
+  - `EXP-RD-SLIDING-LONG-002_bs16`: CE `1.8102`
+  - `EXP-RD-SLIDING-LONG-003_bs16_confirm`: CE `1.8092`
+- conclusion: `batch_size = 16` is now the official `rd` best setting on the sliding-window branch
 
 ### Warmup / Scheduler
 
