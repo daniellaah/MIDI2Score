@@ -24,8 +24,8 @@ Secondary metrics for promotion candidates:
 Always start from the current official `rd` recipe unless a new experiment explicitly changes one knob.
 
 - config: [`configs/pretrain_rd_best.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_rd_best.yaml)
-- experiment summary: [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md)
-- method doc: [`docs/decoder_pretrain_rd.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd.md)
+- experiment summary: [`docs/decoder_pretrain_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_exp.md)
+- method doc: [`docs/decoder_pretrain.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain.md)
 
 Current official recipe:
 
@@ -69,8 +69,8 @@ Use these budget tiers:
 
 ## Important Files
 
-- [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md): `rd` experiment history and decisions
-- [`docs/decoder_pretrain_rd.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd.md): current `rd` method description
+- [`docs/decoder_pretrain_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_exp.md): `rd` experiment history and decisions
+- [`docs/decoder_pretrain.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain.md): current `rd` method description
 - [`configs/pretrain_rd_best.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_rd_best.yaml): official `rd` best config
 - [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py): training entrypoint
 
@@ -124,7 +124,7 @@ These are not theoretical bans; they are current low-priority directions with ne
   - `artifacts/research/<experiment_id>/`
   - `logs/research/<experiment_id>.csv`
   - `logs/tensorboard/research/<experiment_id>/`
-- Read [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) before proposing new work.
+- Read [`docs/decoder_pretrain_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_exp.md) before proposing new work.
 - Each experiment summary must record the git commit and branch.
 
 ## Decision Rule
@@ -151,13 +151,13 @@ Promotion rule:
 
 ## Required Workflow
 
-1. Read [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md).
+1. Read [`docs/decoder_pretrain_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_exp.md).
 2. Identify the current matching baseline for the target budget.
 3. Choose a small batch of experiments that each change only one meaningful variable relative to that baseline.
 4. Commit code changes before running the batch if the worktree is dirty.
 5. Run the batch with [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) and `--experiment-id`.
 6. Read each generated `summary.json`.
-7. Update [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md) only if the batch changed:
+7. Update [`docs/decoder_pretrain_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_exp.md) only if the batch changed:
    - the official best
    - a strong backup direction
    - or an important negative lesson
@@ -222,4 +222,4 @@ uv run python run_pretrain.py \
 - `training.num_steps` remains a safety cap; timed experiments should stop because of `training.max_duration_seconds`.
 - [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py) checks git cleanliness by default in managed experiment mode.
 - Use `--allow-dirty-git` only for local smoke tests, not for managed research runs.
-- Keep this file aligned with [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md). If the official best changes, update both.
+- Keep this file aligned with [`docs/decoder_pretrain_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_exp.md). If the official best changes, update both.
