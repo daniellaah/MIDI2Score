@@ -1,13 +1,7 @@
 import pytest
 
-from midi2score.data import LanguageModelDataConfig
 from midi2score.model import DecoderLanguageModelConfig
 from midi2score.train import TrainingConfig
-
-
-def test_language_model_data_config_rejects_invalid_split() -> None:
-    with pytest.raises(ValueError, match="split"):
-        LanguageModelDataConfig(dataset_path="data/huggingface", split="train")
 
 
 def test_training_config_rejects_non_positive_time_budget() -> None:
@@ -55,42 +49,9 @@ def test_training_config_requires_eval_for_early_stopping() -> None:
         TrainingConfig(early_stopping_patience=3, eval_every=0)
 
 
-def test_language_model_data_config_rejects_non_positive_sliding_window_stride() -> None:
-    with pytest.raises(ValueError, match="sliding_window_stride"):
-        LanguageModelDataConfig(
-            dataset_path="data/huggingface",
-            sliding_window_stride=0,
-        )
-
-
-def test_language_model_data_config_requires_max_length_for_sliding_window() -> None:
-    with pytest.raises(ValueError, match="requires max_length"):
-        LanguageModelDataConfig(
-            dataset_path="data/huggingface",
-            max_length=None,
-            sliding_window_stride=128,
-        )
-
-
-def test_language_model_data_config_rejects_non_positive_max_tokens_per_batch() -> None:
-    with pytest.raises(ValueError, match="max_tokens_per_batch"):
-        LanguageModelDataConfig(
-            dataset_path="data/huggingface",
-            max_tokens_per_batch=1,
-        )
-
-
-def test_language_model_data_config_rejects_non_positive_bucket_size_multiplier() -> None:
-    with pytest.raises(ValueError, match="bucket_size_multiplier"):
-        LanguageModelDataConfig(
-            dataset_path="data/huggingface",
-            bucket_size_multiplier=0,
-        )
-
-
 def test_decoder_language_model_config_rejects_unknown_position_encoding() -> None:
     with pytest.raises(ValueError, match="position_encoding_type"):
         DecoderLanguageModelConfig(
             vocab_size=128,
-            position_encoding_type="learned",
+            position_encoding_type="dynamic_ntk",
         )

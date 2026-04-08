@@ -71,7 +71,6 @@ Use these budget tiers:
 
 - [`docs/decoder_pretrain_rd_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd_exp.md): `rd` experiment history and decisions
 - [`docs/decoder_pretrain_rd.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_rd.md): current `rd` method description
-- [`docs/decoder_pretrain_full_exp.md`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/docs/decoder_pretrain_full_exp.md): `full` reference only; do not tune `full` unless explicitly requested
 - [`configs/pretrain_rd_best.yaml`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/configs/pretrain_rd_best.yaml): official `rd` best config
 - [`run_pretrain.py`](/Users/daboluo/MyWorkSpace/GitHub/MIDI2Score/run_pretrain.py): training entrypoint
 

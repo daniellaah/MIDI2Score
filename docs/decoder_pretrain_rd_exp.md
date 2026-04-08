@@ -64,8 +64,8 @@ Use these rules for all reported final numbers:
 - dropout on the current best branch
 - learned absolute positional encoding
 - ALiBi
-- RoPE
 - flash attention backend on the tested setup
+- RoPE has not yet beaten the official long-run sinusoidal best on the `1024` branch
 
 ## Selected Milestones
 
@@ -100,12 +100,29 @@ Use these rules for all reported final numbers:
    - key outcome:
      - `batch_size = 16` is now the official `rd` best setting
 
+6. RoPE was re-checked on the current official `1024` baseline.
+   - strict `600s` positional-only comparison:
+     - `sinusoidal`
+       - `EXP-RD-POSSTRICT600-SINUSOIDAL-001`
+       - CE `2.2322`
+     - `rope`
+       - `EXP-RD-POSSTRICT600-ROPE-001`
+       - CE `2.3511`
+   - long-budget follow-up:
+     - `EXP-RD-POSSTRICT7200-ROPE-001`
+     - CE `1.8421`
+   - interpretation:
+     - RoPE is competitive and more memory-efficient than sinusoidal on the tested setup, but it still has not surpassed the current official long-run sinusoidal best (`1.8092`)
+   - decision:
+     - keep as a backup positional variant, do not promote
+
 ## Avoid Repeating These Dead Ends
 
 - `2048` context under the current model scale
 - no-truncation with `max_tokens_per_batch`
 - length bucketing on the official branch
-- RoPE / ALiBi / learned positional encoding
+- learned positional encoding
+- ALiBi
 - flash attention backend on current hardware and implementation
 - deeper 3-layer variants
 

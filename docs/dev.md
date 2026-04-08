@@ -65,20 +65,11 @@ Feature schema:
 
 - `input_ids: List[int32]`
 
-### 2.3 HuggingFace Full Dataset
-
-Path:
-
-- `data/huggingface_full/`
-
-This is the larger version of the same decoder-pretraining dataset.
-
-### 2.4 Tokenizers
+### 2.3 Tokenizers
 
 Paths:
 
 - `data/tokenizer_rd.json`
-- `data/tokenizer_full.json`
 
 Important facts verified locally:
 
@@ -95,7 +86,7 @@ It does **not** re-tokenize MusicXML at runtime.
 
 Data flow:
 
-1. load a split from `data/huggingface` or `data/huggingface_full`
+1. load a split from `data/huggingface`
 2. read `input_ids`
 3. optionally crop / truncate to `max_length`
 4. collate into:
@@ -115,12 +106,12 @@ So the current setup is:
 ### 4.1 Data
 
 - `midi2score/data/config.py`
-  - `LanguageModelDataConfig`
+  - `LmxDataConfig`
   - points to a real on-disk HuggingFace dataset
 
 - `midi2score/data/language_model_dataset.py`
-  - `HuggingFaceLanguageModelDataset`
-  - `LanguageModelBatch`
+  - `LmxSlidingWindowDataset`
+  - `LmxBatch`
   - collate logic
   - dataloader builder
 
@@ -180,7 +171,6 @@ So the current setup is:
   - instructions for an agent doing autotuning
 
 - `docs/decoder_pretrain_rd_exp.md`
-- `docs/decoder_pretrain_full_exp.md`
   - experiment history and conclusions
 
 ### 4.4 Config + Entrypoint
@@ -196,7 +186,7 @@ So the current setup is:
 
 ## 5. Important Config Behavior
 
-`LanguageModelDataConfig` controls:
+`LmxDataConfig` controls:
 
 - which dataset to read
 - which split to use
@@ -358,9 +348,8 @@ Then inspect tests:
 
 If work continues on decoder pretraining, the most natural next steps are:
 
-1. keep running single-variable experiments and record them in the appropriate `rd` or `full` experiment summary
+1. keep running single-variable experiments and record them in `docs/decoder_pretrain_rd_exp.md`
 2. tune width / depth / dropout / learning rate with `run_pretrain.py --experiment-id ...`
 3. use 300-second timed baselines when the budget policy changes
-4. consider a separate full-dataset baseline once rd tuning stabilizes
 
 If work later returns to seq2seq, the decoder-pretraining artifacts are already being saved in a form that can be reused.

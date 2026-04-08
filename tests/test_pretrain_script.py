@@ -3,8 +3,8 @@ import subprocess
 
 
 def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
-    checkpoint_path = tmp_path / "decoder.pt"
     config_path = tmp_path / "pretrain.yaml"
+    runs_root = tmp_path / "runs"
     config_path.write_text(
         "\n".join(
             [
@@ -24,14 +24,10 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
                 "  dataset_path: data/huggingface",
                 "  split: training",
                 "  max_length: 64",
-                "  pad_token_id: 0",
-                "  bos_token_id: 1",
-                "  eos_token_id: 2",
-                "  tokenizer_path: data/tokenizer_rd.json",
-                "  random_crop: false",
-                "  crop_seed: 0",
+                "  sliding_window_stride: 32",
                 "  num_workers: 0",
                 "training:",
+                "  seed: 0",
                 "  batch_size: 4",
                 "  learning_rate: 0.001",
                 "  num_steps: 2",
@@ -39,8 +35,6 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
                 "  eval_every: 1",
                 "  num_eval_batches: 1",
                 "  device: cpu",
-                f"  save_checkpoint_path: {checkpoint_path}",
-                f"  save_best_checkpoint_path: {tmp_path / 'decoder-best.pt'}",
             ]
         )
         + "\n",
@@ -48,7 +42,16 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
     )
 
     result = subprocess.run(
-        ["uv", "run", "python", "run_pretrain.py", "--config", str(config_path)],
+        [
+            "uv",
+            "run",
+            "python",
+            "run_pretrain.py",
+            "--config",
+            str(config_path),
+            "--runs-root",
+            str(runs_root),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -56,4 +59,11 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
 
     assert "finished 2 pretraining steps on cpu" in result.stdout
     assert "best validation loss" in result.stdout
-    assert checkpoint_path.exists()
+    run_dirs = [path for path in runs_root.iterdir() if path.is_dir()]
+    assert len(run_dirs) == 1
+    run_dir = run_dirs[0]
+    assert (run_dir / "latest.pt").exists()
+    assert (run_dir / "best.pt").exists()
+    assert (run_dir / "summary.json").exists()
+    assert (run_dir / "config.yaml").exists()
+    assert (run_dir / "train.csv").exists()

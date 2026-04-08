@@ -15,15 +15,11 @@ data:
   dataset_path: data/huggingface
   split: training
   max_length: 512
-  pad_token_id: 0
-  bos_token_id: 1
-  eos_token_id: 2
-  tokenizer_path: data/tokenizer_rd.json
-  random_crop: true
-  crop_seed: 23
+  sliding_window_stride: 256
   num_workers: 0
 
 training:
+  seed: 23
   batch_size: 4
   learning_rate: 0.001
   num_steps: 16000

@@ -2,23 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
 import yaml
 
-from midi2score.data import LanguageModelDataConfig
+from midi2score.data import LmxDataConfig
 from midi2score.model import DecoderLanguageModelConfig
 from midi2score.train import TrainingConfig
 
 
 @dataclass(slots=True)
-class DecoderPretrainProjectConfig:
+class PretrainConfig:
     model: DecoderLanguageModelConfig
-    data: LanguageModelDataConfig
+    data: LmxDataConfig
     training: TrainingConfig
 
 
-def load_decoder_pretrain_config(path: str | Path) -> DecoderPretrainProjectConfig:
+def load_pretrain_config(path: str | Path) -> PretrainConfig:
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as handle:
         raw_config = yaml.safe_load(handle)
@@ -26,19 +24,15 @@ def load_decoder_pretrain_config(path: str | Path) -> DecoderPretrainProjectConf
     if not isinstance(raw_config, dict):
         raise ValueError("Top-level config must be a mapping with model/data/training sections.")
 
-    model_section = _get_section(raw_config, "model")
-    data_section = _get_section(raw_config, "data")
-    training_section = _get_section(raw_config, "training")
+    sections = {}
+    for name in ("model", "data", "training"):
+        section = raw_config.get(name)
+        if not isinstance(section, dict):
+            raise ValueError(f"Config section {name!r} must be a mapping.")
+        sections[name] = section
 
-    return DecoderPretrainProjectConfig(
-        model=DecoderLanguageModelConfig(**model_section),
-        data=LanguageModelDataConfig(**data_section),
-        training=TrainingConfig(**training_section),
+    return PretrainConfig(
+        model=DecoderLanguageModelConfig(**sections["model"]),
+        data=LmxDataConfig(**sections["data"]),
+        training=TrainingConfig(**sections["training"]),
     )
-
-
-def _get_section(raw_config: dict[str, Any], section_name: str) -> dict[str, Any]:
-    section = raw_config.get(section_name)
-    if not isinstance(section, dict):
-        raise ValueError(f"Config section {section_name!r} must be a mapping.")
-    return section

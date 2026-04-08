@@ -250,3 +250,4 @@ All final metrics are computed on the **full validation split**.
 - Full-coverage sliding-window training is better than using only a single crop from long training sequences.
 - Full-coverage sliding-window validation is the correct reporting method for this fixed-length model.
 - The strongest current `rd` recipe is the `batch_size = 16` sliding-window branch recorded in `configs/pretrain_rd_best.yaml`.
+- Among tested positional variants on the current `1024` branch, `sinusoidal` remains the official choice; `RoPE` is a backup candidate but has not yet exceeded the official long-run best.

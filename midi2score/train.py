@@ -12,12 +12,13 @@ from torch.optim import Adam, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
-from midi2score.data import LanguageModelDataConfig, build_language_model_dataloader
+from midi2score.data import LmxDataConfig, build_language_model_dataloader
 from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 
 
 @dataclass(slots=True)
 class TrainingConfig:
+    seed: int = 0
     batch_size: int = 8
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
@@ -41,6 +42,8 @@ class TrainingConfig:
     tensorboard_log_dir: str | None = None
 
     def __post_init__(self) -> None:
+        if self.seed < 0:
+            raise ValueError("seed must be non-negative.")
         if self.batch_size <= 0:
             raise ValueError("batch_size must be positive.")
         if self.learning_rate <= 0.0:
@@ -97,6 +100,8 @@ class DecoderPretrainingResult:
     elapsed_seconds: float
     stopped_due_to_time_budget: bool
     stopped_due_to_early_stopping: bool
+    average_step_time_seconds: float
+    average_tokens_per_second: float
 
 
 @dataclass(slots=True)
@@ -135,7 +140,6 @@ class TrainingLogger:
     def close(self) -> None:
         if self._writer is not None:
             self._writer.close()
-
 
 def resolve_device(requested_device: str) -> str:
     if requested_device != "auto":
@@ -275,17 +279,23 @@ def evaluate_decoder_language_model_metrics(
 
 def run_decoder_pretraining_loop(
     model_config: DecoderLanguageModelConfig,
-    data_config: LanguageModelDataConfig,
+    data_config: LmxDataConfig,
     training_config: TrainingConfig,
 ) -> DecoderPretrainingResult:
     _validate_setup(model_config, data_config)
+    torch.manual_seed(training_config.seed)
     device = resolve_device(training_config.device)
-    train_loader = build_language_model_dataloader(data_config, batch_size=training_config.batch_size)
+    train_loader = build_language_model_dataloader(
+        data_config,
+        batch_size=training_config.batch_size,
+        seed=training_config.seed,
+    )
     validation_loader = None
     if training_config.eval_every > 0:
         validation_loader = build_language_model_dataloader(
-            replace(data_config, split="validation", random_crop=False),
+            replace(data_config, split="validation"),
             batch_size=training_config.batch_size,
+            seed=training_config.seed,
             shuffle=False,
         )
 
@@ -322,6 +332,8 @@ def run_decoder_pretraining_loop(
 
     iterator = iter(train_loader)
     started_at = time.monotonic()
+    cumulative_step_seconds = 0.0
+    cumulative_tokens = 0
     final_step = start_step
     stopped_due_to_time_budget = False
     stopped_due_to_early_stopping = False
@@ -344,6 +356,7 @@ def run_decoder_pretraining_loop(
             model.train()
             optimizer.zero_grad(set_to_none=True)
             batch = batch.to(device)
+            step_started_at = time.monotonic()
             logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
             loss = F.cross_entropy(
                 logits.reshape(-1, logits.size(-1)),
@@ -358,13 +371,29 @@ def run_decoder_pretraining_loop(
             if scheduler is not None:
                 scheduler.step()
 
+            step_elapsed_seconds = time.monotonic() - step_started_at
+            step_tokens = int(batch.output_tokens.ne(model_config.pad_token_id).sum().item())
+            cumulative_step_seconds += step_elapsed_seconds
+            cumulative_tokens += step_tokens
             loss_value = float(loss.item())
             losses.append(loss_value)
             final_step = step
             logger.log_scalar(step=step, split="train", value=loss_value)
+            logger.log_scalar(step=step, split="train", metric="step_time_seconds", value=step_elapsed_seconds)
+            logger.log_scalar(
+                step=step,
+                split="train",
+                metric="tokens_per_second",
+                value=step_tokens / max(step_elapsed_seconds, 1e-12),
+            )
 
             if step % training_config.log_every == 0:
-                print(f"step={step} pretrain_loss={loss_value:.4f} device={device}")
+                print(
+                    f"step={step} pretrain_loss={loss_value:.4f} "
+                    f"step_time={step_elapsed_seconds:.4f}s "
+                    f"tokens_per_second={step_tokens / max(step_elapsed_seconds, 1e-12):.1f} "
+                    f"device={device}"
+                )
 
             if validation_loader is not None and step % training_config.eval_every == 0:
                 metrics = evaluate_decoder_language_model_metrics(
@@ -457,6 +486,8 @@ def run_decoder_pretraining_loop(
         elapsed_seconds=elapsed_seconds,
         stopped_due_to_time_budget=stopped_due_to_time_budget,
         stopped_due_to_early_stopping=stopped_due_to_early_stopping,
+        average_step_time_seconds=cumulative_step_seconds / max(len(losses), 1),
+        average_tokens_per_second=cumulative_tokens / max(cumulative_step_seconds, 1e-12),
     )
 
 
@@ -466,7 +497,7 @@ def _checkpoint_payload(
     optimizer: Adam,
     scheduler: LambdaLR | None,
     model_config: DecoderLanguageModelConfig,
-    data_config: LanguageModelDataConfig,
+    data_config: LmxDataConfig,
     training_config: TrainingConfig,
     step: int,
     best_validation_loss: float | None,
@@ -487,10 +518,7 @@ def _checkpoint_payload(
 
 def _validate_setup(
     model_config: DecoderLanguageModelConfig,
-    data_config: LanguageModelDataConfig,
+    data_config: LmxDataConfig,
 ) -> None:
-    if data_config.max_length is not None and model_config.max_length < data_config.max_length:
+    if model_config.max_length < data_config.max_length:
         raise ValueError("model.max_length must be >= data.max_length.")
-    tokenizer_vocab_size = data_config.tokenizer_vocab_size()
-    if tokenizer_vocab_size is not None and tokenizer_vocab_size != model_config.vocab_size:
-        raise ValueError("Tokenizer vocab size does not match model vocab size.")

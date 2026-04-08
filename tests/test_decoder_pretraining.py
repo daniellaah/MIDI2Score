@@ -5,9 +5,9 @@ import pytest
 import torch
 
 from midi2score.data import (
-    HuggingFaceLanguageModelDataset,
-    LanguageModelBatch,
-    LanguageModelDataConfig,
+    LmxSlidingWindowDataset,
+    LmxBatch,
+    LmxDataConfig,
     LengthBucketBatchSampler,
     build_language_model_dataloader,
 )
@@ -31,87 +31,39 @@ def build_small_real_batch() -> tuple[DecoderLanguageModelConfig, object]:
         dim_feedforward=64,
         max_length=64,
     )
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
-    batch = next(iter(build_language_model_dataloader(data_config, batch_size=4, shuffle=False)))
+    batch = next(iter(build_language_model_dataloader(data_config, batch_size=4, seed=0, shuffle=False)))
     return model_config, batch
 
 
 def test_language_model_dataloader_reads_real_dataset() -> None:
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
-    batch = next(iter(build_language_model_dataloader(data_config, batch_size=2, shuffle=False)))
+    batch = next(iter(build_language_model_dataloader(data_config, batch_size=2, seed=0, shuffle=False)))
 
     assert batch.input_tokens.shape[0] == 2
     assert batch.input_tokens.shape == batch.output_tokens.shape
     assert batch.padding_mask.dtype == torch.bool
-    assert batch.input_tokens[0, 0].item() == data_config.bos_token_id
-
-
-def test_training_random_crop_changes_across_repeated_accesses() -> None:
-    config = LanguageModelDataConfig(
-        dataset_path="data/huggingface",
-        split="training",
-        max_length=32,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=True,
-        crop_seed=23,
-    )
-    dataset = HuggingFaceLanguageModelDataset(config)
-    long_index = next(
-        index
-        for index in range(len(dataset))
-        if len(dataset.dataset[index]["input_ids"]) > config.max_length * 3
-    )
-
-    first_draws = [dataset[long_index]["tokens"].tolist() for _ in range(8)]
-    second_dataset = HuggingFaceLanguageModelDataset(config)
-    second_draws = [second_dataset[long_index]["tokens"].tolist() for _ in range(8)]
-
-    assert len({tuple(draw) for draw in first_draws}) > 1
-    assert first_draws == second_draws
-
-
-def test_no_truncation_keeps_long_sequence_length() -> None:
-    config = LanguageModelDataConfig(
-        dataset_path="data/huggingface",
-        split="training",
-        max_length=None,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
-    )
-    dataset = HuggingFaceLanguageModelDataset(config)
-    long_index = next(
-        index
-        for index in range(len(dataset.dataset))
-        if len(dataset.dataset[index]["input_ids"]) > 2048
-    )
-
-    example = dataset[long_index]
-
-    assert len(example["tokens"]) == len(dataset.dataset[long_index]["input_ids"])
+    assert batch.input_tokens[0, 0].item() == 1
 
 
 def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
-    config = LanguageModelDataConfig(
+    config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=32,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
         sliding_window_stride=16,
     )
-    dataset = HuggingFaceLanguageModelDataset(config)
+    dataset = LmxSlidingWindowDataset(config)
     long_index = next(
         index
         for index in range(len(dataset.dataset))
@@ -139,15 +91,13 @@ def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
 
 
 def test_validation_sliding_window_scores_each_target_token_once() -> None:
-    config = LanguageModelDataConfig(
+    config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="validation",
         max_length=32,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
         sliding_window_stride=16,
     )
-    dataset = HuggingFaceLanguageModelDataset(config)
+    dataset = LmxSlidingWindowDataset(config)
     long_index = next(
         index
         for index in range(len(dataset.dataset))
@@ -167,22 +117,18 @@ def test_validation_sliding_window_scores_each_target_token_once() -> None:
 
 
 def test_length_bucket_batch_sampler_groups_examples_by_length() -> None:
-    config = LanguageModelDataConfig(
+    config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
         length_bucketing=True,
-        bucket_size_multiplier=8,
     )
-    dataset = HuggingFaceLanguageModelDataset(config)
+    dataset = LmxSlidingWindowDataset(config)
     sampler = LengthBucketBatchSampler(
         dataset=dataset,
         batch_size=4,
-        drop_last=False,
         seed=23,
-        bucket_size_multiplier=config.bucket_size_multiplier,
         shuffle=True,
     )
 
@@ -190,35 +136,6 @@ def test_length_bucket_batch_sampler_groups_examples_by_length() -> None:
     lengths = [dataset.sequence_length(index) for index in batch_indices]
 
     assert lengths == sorted(lengths, reverse=True)
-
-
-def test_token_budget_batch_sampler_respects_max_tokens() -> None:
-    config = LanguageModelDataConfig(
-        dataset_path="data/huggingface",
-        split="training",
-        max_length=None,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
-        length_bucketing=True,
-        max_tokens_per_batch=4096,
-        bucket_size_multiplier=8,
-    )
-    dataset = HuggingFaceLanguageModelDataset(config)
-    sampler = LengthBucketBatchSampler(
-        dataset=dataset,
-        batch_size=None,
-        max_tokens_per_batch=config.max_tokens_per_batch,
-        drop_last=False,
-        seed=23,
-        bucket_size_multiplier=config.bucket_size_multiplier,
-        shuffle=True,
-    )
-
-    batch_indices = next(iter(sampler))
-    lengths = [dataset.sequence_length(index) for index in batch_indices]
-
-    padded_tokens = max(lengths) * len(lengths)
-    assert padded_tokens <= config.max_tokens_per_batch or len(lengths) == 1
 
 
 def test_decoder_language_model_forward_produces_vocab_logits() -> None:
@@ -234,23 +151,40 @@ def test_decoder_language_model_forward_produces_vocab_logits() -> None:
     )
 
 
+@pytest.mark.parametrize("position_encoding_type", ["sinusoidal", "learned", "alibi", "rope", "rope_ntk"])
+def test_decoder_language_model_supports_position_encoding_variants(
+    position_encoding_type: str,
+) -> None:
+    model_config, batch = build_small_real_batch()
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=model_config.vocab_size,
+        d_model=model_config.d_model,
+        nhead=model_config.nhead,
+        num_layers=model_config.num_layers,
+        dim_feedforward=model_config.dim_feedforward,
+        max_length=model_config.max_length,
+        position_encoding_type=position_encoding_type,
+    )
+    model = TransformerDecoderLM(model_config)
+
+    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+
+    assert logits.shape[-1] == model_config.vocab_size
+
+
 def test_validation_bucketing_is_deterministic_without_shuffle() -> None:
-    config = LanguageModelDataConfig(
+    config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="validation",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
         length_bucketing=True,
-        bucket_size_multiplier=8,
     )
-    dataset = HuggingFaceLanguageModelDataset(config)
+    dataset = LmxSlidingWindowDataset(config)
     sampler = LengthBucketBatchSampler(
         dataset=dataset,
         batch_size=4,
-        drop_last=False,
         seed=23,
-        bucket_size_multiplier=config.bucket_size_multiplier,
         shuffle=False,
     )
 
@@ -272,14 +206,14 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
         dim_feedforward=64,
         max_length=64,
     )
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
     training_config = TrainingConfig(
+        seed=0,
         batch_size=4,
         num_steps=2,
         weight_decay=0.01,
@@ -305,23 +239,26 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
         rows = list(csv.reader(handle))
     assert rows[0] == ["step", "split", "metric", "value"]
     assert any(row[1] == "train" and row[2] == "loss" for row in rows[1:])
+    assert any(row[1] == "train" and row[2] == "step_time_seconds" for row in rows[1:])
+    assert any(row[1] == "train" and row[2] == "tokens_per_second" for row in rows[1:])
     assert any(row[1] == "validation" and row[2] == "loss" for row in rows[1:])
     assert any(row[1] == "validation" and row[2] == "perplexity" for row in rows[1:])
     assert any(row[1] == "validation" and row[2] == "token_accuracy" for row in rows[1:])
     assert any(row[1] == "validation" and row[2] == "top5_accuracy" for row in rows[1:])
+    assert result.average_step_time_seconds > 0.0
+    assert result.average_tokens_per_second > 0.0
 
 
 def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
     model_config, batch = build_small_real_batch()
     model = TransformerDecoderLM(model_config)
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="validation",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
-    loader = build_language_model_dataloader(data_config, batch_size=2, shuffle=False)
+    loader = build_language_model_dataloader(data_config, batch_size=2, seed=0, shuffle=False)
 
     loss = evaluate_decoder_language_model(
         model,
@@ -337,14 +274,13 @@ def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
 def test_evaluate_decoder_language_model_metrics_returns_expected_fields() -> None:
     model_config, _ = build_small_real_batch()
     model = TransformerDecoderLM(model_config)
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="validation",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
-    loader = build_language_model_dataloader(data_config, batch_size=2, shuffle=False)
+    loader = build_language_model_dataloader(data_config, batch_size=2, seed=0, shuffle=False)
 
     metrics = evaluate_decoder_language_model_metrics(
         model,
@@ -387,12 +323,12 @@ def test_evaluate_decoder_language_model_metrics_uses_token_weighted_loss() -> N
             return logits
 
     batches = [
-        LanguageModelBatch(
+        LmxBatch(
             input_tokens=torch.tensor([[1, 2]], dtype=torch.long),
             output_tokens=torch.tensor([[0, 1]], dtype=torch.long),
             padding_mask=torch.zeros((1, 2), dtype=torch.bool),
         ),
-        LanguageModelBatch(
+        LmxBatch(
             input_tokens=torch.tensor([[1, 2, 3, 4]], dtype=torch.long),
             output_tokens=torch.tensor([[0, 0, 0, 1]], dtype=torch.long),
             padding_mask=torch.zeros((1, 4), dtype=torch.bool),
@@ -433,7 +369,7 @@ def test_evaluate_decoder_language_model_metrics_respects_loss_mask() -> None:
                 dtype=torch.float32,
             )
 
-    batch = LanguageModelBatch(
+    batch = LmxBatch(
         input_tokens=torch.tensor([[1, 2, 3]], dtype=torch.long),
         output_tokens=torch.tensor([[0, 1, 0]], dtype=torch.long),
         padding_mask=torch.zeros((1, 3), dtype=torch.bool),
@@ -494,15 +430,15 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
         dim_feedforward=64,
         max_length=64,
     )
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
 
     first_stage = TrainingConfig(
+        seed=0,
         batch_size=4,
         num_steps=2,
         log_every=10,
@@ -514,6 +450,7 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
     run_decoder_pretraining_loop(model_config, data_config, first_stage)
 
     second_stage = TrainingConfig(
+        seed=0,
         batch_size=4,
         num_steps=4,
         log_every=10,
@@ -530,7 +467,7 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
     assert result.resumed_from_checkpoint == str(checkpoint_path)
     with csv_log_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.reader(handle))
-    logged_steps = [int(row[0]) for row in rows[1:] if row[1] == "train"]
+    logged_steps = [int(row[0]) for row in rows[1:] if row[1] == "train" and row[2] == "loss"]
     assert logged_steps == [3, 4]
 
 
@@ -569,15 +506,15 @@ def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
         dim_feedforward=64,
         max_length=64,
     )
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
 
     first_stage = TrainingConfig(
+        seed=0,
         batch_size=4,
         num_steps=2,
         log_every=10,
@@ -591,6 +528,7 @@ def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
     run_decoder_pretraining_loop(model_config, data_config, first_stage)
 
     second_stage = TrainingConfig(
+        seed=0,
         batch_size=4,
         num_steps=3,
         log_every=10,
@@ -617,14 +555,14 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
         dim_feedforward=64,
         max_length=64,
     )
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
     training_config = TrainingConfig(
+        seed=0,
         batch_size=4,
         num_steps=10,
         max_duration_seconds=1.0,
@@ -634,7 +572,7 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
         save_checkpoint_path=str(checkpoint_path),
     )
 
-    clock_values = iter([0.0, 0.6, 1.2, 1.8])
+    clock_values = iter([0.0, 0.1, 0.6, 1.2, 1.8])
     monkeypatch.setattr(
         "midi2score.train.time.monotonic",
         lambda: next(clock_values),
@@ -643,8 +581,8 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
     result = run_decoder_pretraining_loop(model_config, data_config, training_config)
 
     assert result.stopped_due_to_time_budget is True
-    assert result.final_step == 2
-    assert len(result.losses) == 2
+    assert result.final_step == 1
+    assert len(result.losses) == 1
     assert result.elapsed_seconds == pytest.approx(1.8)
 
 
@@ -658,14 +596,14 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
         dim_feedforward=64,
         max_length=64,
     )
-    data_config = LanguageModelDataConfig(
+    data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        tokenizer_path="data/tokenizer_rd.json",
-        random_crop=False,
+        sliding_window_stride=32,
     )
     training_config = TrainingConfig(
+        seed=0,
         batch_size=4,
         num_steps=20,
         log_every=10,

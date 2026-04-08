@@ -1,9 +1,9 @@
 """MIDI2Score package."""
 
 from midi2score.data import (
-    HuggingFaceLanguageModelDataset,
-    LanguageModelBatch,
-    LanguageModelDataConfig,
+    LmxSlidingWindowDataset,
+    LmxBatch,
+    LmxDataConfig,
     LengthBucketBatchSampler,
     build_language_model_dataloader,
     collate_language_model_batch,
@@ -23,9 +23,9 @@ __all__ = [
     "DecoderEvaluationMetrics",
     "DecoderLanguageModelConfig",
     "DecoderPretrainingResult",
-    "HuggingFaceLanguageModelDataset",
-    "LanguageModelBatch",
-    "LanguageModelDataConfig",
+    "LmxSlidingWindowDataset",
+    "LmxBatch",
+    "LmxDataConfig",
     "LengthBucketBatchSampler",
     "TrainingConfig",
     "TransformerDecoderLM",
