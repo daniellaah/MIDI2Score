@@ -9,7 +9,7 @@ Last updated: 2026-04-08
 - Add new experiments as new top-level sections with the same format.
 - Compare every new run against the current baseline unless explicitly replaced.
 
-## Baseline: 600s
+## Baseline: 3600s
 
 ### Status
 
@@ -22,7 +22,7 @@ Last updated: 2026-04-08
 - `sliding_window_stride = 256`
 - `d_model = 256`
 - `nhead = 4`
-- `num_layers = 2`
+- `num_layers = 4`
 - `dim_feedforward = 1024`
 - positional encoding: `sinusoidal`
 - residual layout: `pre_norm`
@@ -37,18 +37,18 @@ Last updated: 2026-04-08
 
 ### Run
 
-- run dir: [`../artifacts/runs/2026-04-08_14-39-35_064237`](../artifacts/runs/2026-04-08_14-39-35_064237)
-- summary: [`../artifacts/runs/2026-04-08_14-39-35_064237/summary.json`](../artifacts/runs/2026-04-08_14-39-35_064237/summary.json)
-- config snapshot: [`../artifacts/runs/2026-04-08_14-39-35_064237/config.yaml`](../artifacts/runs/2026-04-08_14-39-35_064237/config.yaml)
+- run dir: [`../artifacts/runs/2026-04-08_20-49-04_250119`](../artifacts/runs/2026-04-08_20-49-04_250119)
+- summary: [`../artifacts/runs/2026-04-08_20-49-04_250119/summary.json`](../artifacts/runs/2026-04-08_20-49-04_250119/summary.json)
+- config snapshot: [`../artifacts/runs/2026-04-08_20-49-04_250119/config.yaml`](../artifacts/runs/2026-04-08_20-49-04_250119/config.yaml)
 
 ### Metrics
 
-- best validation loss: `2.1690`
-- final step: `3500`
-- elapsed seconds: `623.78`
+- best validation loss: `1.8180`
+- final step: `12000`
+- elapsed seconds: `3616.72`
 - device: `mps`
-- average step time: `0.0121s`
-- average tokens per second: `917671.5`
+- average step time: `0.1099s`
+- average tokens per second: `100749.7`
 
 ### Decision
 
