@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import Adam, Optimizer
+from torch.optim import Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
@@ -20,6 +20,7 @@ from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 class TrainingConfig:
     seed: int = 0
     batch_size: int = 8
+    optimizer: str = "adam"
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     grad_clip_norm: float | None = None
@@ -46,6 +47,8 @@ class TrainingConfig:
             raise ValueError("seed must be non-negative.")
         if self.batch_size <= 0:
             raise ValueError("batch_size must be positive.")
+        if self.optimizer not in {"adam", "adamw"}:
+            raise ValueError("optimizer must be adam or adamw.")
         if self.learning_rate <= 0.0:
             raise ValueError("learning_rate must be positive.")
         if self.weight_decay < 0.0:
@@ -182,7 +185,7 @@ def load_checkpoint_for_resume(
     )
 
 
-def build_lr_scheduler(optimizer: Adam, training_config: TrainingConfig) -> LambdaLR | None:
+def build_lr_scheduler(optimizer: Optimizer, training_config: TrainingConfig) -> LambdaLR | None:
     if training_config.scheduler == "none" and training_config.warmup_steps == 0:
         return None
 
@@ -300,7 +303,8 @@ def run_decoder_pretraining_loop(
         )
 
     model = TransformerDecoderLM(model_config).to(device)
-    optimizer = Adam(
+    optimizer_cls = Adam if training_config.optimizer == "adam" else AdamW
+    optimizer = optimizer_cls(
         model.parameters(),
         lr=training_config.learning_rate,
         weight_decay=training_config.weight_decay,
@@ -494,7 +498,7 @@ def run_decoder_pretraining_loop(
 def _checkpoint_payload(
     *,
     model: TransformerDecoderLM,
-    optimizer: Adam,
+    optimizer: Optimizer,
     scheduler: LambdaLR | None,
     model_config: DecoderLanguageModelConfig,
     data_config: LmxDataConfig,

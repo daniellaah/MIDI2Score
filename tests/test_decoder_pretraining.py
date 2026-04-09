@@ -151,9 +151,26 @@ def test_decoder_language_model_forward_produces_vocab_logits() -> None:
     )
 
 
-@pytest.mark.parametrize("position_encoding_type", ["sinusoidal", "learned", "alibi", "rope", "rope_ntk"])
-def test_decoder_language_model_supports_position_encoding_variants(
+@pytest.mark.parametrize(
+    ("position_encoding_type", "norm_type", "residual_layout", "activation"),
+    [
+        ("sinusoidal", "layernorm", "post_norm", "relu"),
+        ("learned", "layernorm", "post_norm", "relu"),
+        ("alibi", "layernorm", "post_norm", "relu"),
+        ("rope", "layernorm", "post_norm", "relu"),
+        ("rope_ntk", "layernorm", "post_norm", "relu"),
+        ("sinusoidal", "layernorm", "pre_norm", "relu"),
+        ("sinusoidal", "rmsnorm", "post_norm", "relu"),
+        ("sinusoidal", "rmsnorm", "pre_norm", "relu"),
+        ("sinusoidal", "layernorm", "post_norm", "swiglu"),
+        ("sinusoidal", "layernorm", "post_norm", "geglu"),
+    ],
+)
+def test_decoder_language_model_supports_model_variants(
     position_encoding_type: str,
+    norm_type: str,
+    residual_layout: str,
+    activation: str,
 ) -> None:
     model_config, batch = build_small_real_batch()
     model_config = DecoderLanguageModelConfig(
@@ -164,12 +181,34 @@ def test_decoder_language_model_supports_position_encoding_variants(
         dim_feedforward=model_config.dim_feedforward,
         max_length=model_config.max_length,
         position_encoding_type=position_encoding_type,
+        norm_type=norm_type,
+        residual_layout=residual_layout,
+        activation=activation,
     )
     model = TransformerDecoderLM(model_config)
 
     logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
 
     assert logits.shape[-1] == model_config.vocab_size
+
+
+def test_decoder_language_model_supports_tied_embeddings() -> None:
+    model_config, batch = build_small_real_batch()
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=model_config.vocab_size,
+        d_model=model_config.d_model,
+        nhead=model_config.nhead,
+        num_layers=model_config.num_layers,
+        dim_feedforward=model_config.dim_feedforward,
+        max_length=model_config.max_length,
+        tie_embeddings=True,
+    )
+    model = TransformerDecoderLM(model_config)
+
+    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+
+    assert logits.shape[-1] == model_config.vocab_size
+    assert model.output_projection.weight is model.tgt_embedding.weight
 
 
 def test_validation_bucketing_is_deterministic_without_shuffle() -> None:
@@ -215,6 +254,7 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     training_config = TrainingConfig(
         seed=0,
         batch_size=4,
+        optimizer="adamw",
         num_steps=2,
         weight_decay=0.01,
         grad_clip_norm=1.0,

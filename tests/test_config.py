@@ -14,6 +14,11 @@ def test_training_config_rejects_unknown_scheduler() -> None:
         TrainingConfig(scheduler="triangle")
 
 
+def test_training_config_rejects_unknown_optimizer() -> None:
+    with pytest.raises(ValueError, match="optimizer"):
+        TrainingConfig(optimizer="sgd")
+
+
 def test_training_config_rejects_negative_weight_decay() -> None:
     with pytest.raises(ValueError, match="weight_decay"):
         TrainingConfig(weight_decay=-0.1)
@@ -55,3 +60,18 @@ def test_decoder_language_model_config_rejects_unknown_position_encoding() -> No
             vocab_size=128,
             position_encoding_type="dynamic_ntk",
         )
+
+
+def test_decoder_language_model_config_rejects_unknown_norm_type() -> None:
+    with pytest.raises(ValueError, match="norm_type"):
+        DecoderLanguageModelConfig(vocab_size=128, norm_type="batchnorm")
+
+
+def test_decoder_language_model_config_rejects_unknown_residual_layout() -> None:
+    with pytest.raises(ValueError, match="residual_layout"):
+        DecoderLanguageModelConfig(vocab_size=128, residual_layout="sandwich")
+
+
+def test_decoder_language_model_config_rejects_unknown_activation() -> None:
+    with pytest.raises(ValueError, match="activation"):
+        DecoderLanguageModelConfig(vocab_size=128, activation="swish")

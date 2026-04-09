@@ -5,7 +5,10 @@ model:
   num_layers: 2
   dim_feedforward: 1024
   dropout: 0.0
-  activation: relu
+  activation: swiglu
+  norm_type: rmsnorm
+  residual_layout: pre_norm
+  tie_embeddings: false
   position_encoding_type: sinusoidal
   pad_token_id: 0
   bos_token_id: 1
@@ -16,13 +19,14 @@ data:
   dataset_path: data/huggingface
   split: training
   max_length: 1024
-  sliding_window_stride: 512
+  sliding_window_stride: 256
   length_bucketing: false
   num_workers: 0
 
 training:
   seed: 23
   batch_size: 16
+  optimizer: adamw
   learning_rate: 0.0006
   weight_decay: 0.0
   grad_clip_norm: null

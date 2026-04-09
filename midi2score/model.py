@@ -18,6 +18,9 @@ class DecoderLanguageModelConfig:
     dim_feedforward: int = 1024
     dropout: float = 0.1
     activation: str = "relu"
+    norm_type: str = "layernorm"
+    residual_layout: str = "post_norm"
+    tie_embeddings: bool = False
     position_encoding_type: str = "sinusoidal"
     rope_theta: float = 10_000.0
     rope_scaling_factor: float = 2.0
@@ -30,8 +33,12 @@ class DecoderLanguageModelConfig:
     def __post_init__(self) -> None:
         if self.d_model % self.nhead != 0:
             raise ValueError("d_model must be divisible by nhead.")
-        if self.activation not in {"relu", "gelu"}:
-            raise ValueError("activation must be relu or gelu.")
+        if self.activation not in {"relu", "gelu", "swiglu", "geglu"}:
+            raise ValueError("activation must be relu, gelu, swiglu, or geglu.")
+        if self.norm_type not in {"layernorm", "rmsnorm"}:
+            raise ValueError("norm_type must be layernorm or rmsnorm.")
+        if self.residual_layout not in {"post_norm", "pre_norm"}:
+            raise ValueError("residual_layout must be post_norm or pre_norm.")
         if self.position_encoding_type not in {"sinusoidal", "learned", "alibi", "rope", "rope_ntk"}:
             raise ValueError(
                 "position_encoding_type must be sinusoidal, learned, alibi, rope, or rope_ntk."
@@ -246,6 +253,47 @@ def _activation(name: str):
     return torch.relu if name == "relu" else torch.nn.functional.gelu
 
 
+class RMSNorm(nn.Module):
+    def __init__(self, d_model: int, eps: float = 1e-8) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(d_model))
+        self.eps = eps
+
+    def forward(self, x: Tensor) -> Tensor:
+        rms = x.pow(2).mean(dim=-1, keepdim=True).add(self.eps).rsqrt()
+        return x * rms * self.weight
+
+
+def build_norm(norm_type: str, d_model: int) -> nn.Module:
+    if norm_type == "layernorm":
+        return nn.LayerNorm(d_model)
+    if norm_type == "rmsnorm":
+        return RMSNorm(d_model)
+    raise ValueError(f"Unsupported norm_type {norm_type!r}.")
+
+
+class FeedForward(nn.Module):
+    def __init__(self, *, d_model: int, dim_feedforward: int, dropout: float, activation: str) -> None:
+        super().__init__()
+        self.activation_name = activation
+        hidden_dim = dim_feedforward * 2 if activation in {"swiglu", "geglu"} else dim_feedforward
+        self.linear1 = nn.Linear(d_model, hidden_dim)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: Tensor) -> Tensor:
+        hidden = self.linear1(x)
+        if self.activation_name == "swiglu":
+            value, gate = hidden.chunk(2, dim=-1)
+            hidden = value * F.silu(gate)
+        elif self.activation_name == "geglu":
+            value, gate = hidden.chunk(2, dim=-1)
+            hidden = value * F.gelu(gate)
+        else:
+            hidden = _activation(self.activation_name)(hidden)
+        return self.linear2(self.dropout(hidden))
+
+
 class TransformerDecoderLayer(nn.Module):
     def __init__(
         self,
@@ -255,6 +303,8 @@ class TransformerDecoderLayer(nn.Module):
         dim_feedforward: int,
         dropout: float,
         activation: str,
+        norm_type: str,
+        residual_layout: str,
         position_encoding_type: str,
         max_length: int,
         rope_theta: float,
@@ -280,14 +330,17 @@ class TransformerDecoderLayer(nn.Module):
                 dropout=dropout,
                 batch_first=True,
             )
-        self.linear1 = nn.Linear(d_model, dim_feedforward)
-        self.linear2 = nn.Linear(dim_feedforward, d_model)
-        self.dropout = nn.Dropout(dropout)
+        self.feedforward = FeedForward(
+            d_model=d_model,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation=activation,
+        )
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.activation = _activation(activation)
+        self.norm1 = build_norm(norm_type, d_model)
+        self.norm2 = build_norm(norm_type, d_model)
+        self.residual_layout = residual_layout
 
     def forward(
         self,
@@ -297,16 +350,17 @@ class TransformerDecoderLayer(nn.Module):
         tgt_padding_mask: Tensor | None = None,
     ) -> Tensor:
         x = tgt
+        residual_input = self.norm1(x) if self.residual_layout == "pre_norm" else x
         if self.position_encoding_type in {"rope", "rope_ntk"}:
             self_attn_output = self.self_attn(
-                x,
+                residual_input,
                 key_padding_mask=tgt_padding_mask,
             )
         else:
             self_attn_output = self.self_attn(
-                x,
-                x,
-                x,
+                residual_input,
+                residual_input,
+                residual_input,
                 attn_mask=tgt_causal_mask,
                 key_padding_mask=normalize_key_padding_mask(
                     tgt_padding_mask,
@@ -314,9 +368,15 @@ class TransformerDecoderLayer(nn.Module):
                 ),
                 need_weights=False,
             )[0]
-        x = self.norm1(x + self.dropout1(self_attn_output))
-        ff_output = self.linear2(self.dropout(self.activation(self.linear1(x))))
-        return self.norm2(x + self.dropout2(ff_output))
+        x = x + self.dropout1(self_attn_output)
+        if self.residual_layout == "post_norm":
+            x = self.norm1(x)
+        ff_input = self.norm2(x) if self.residual_layout == "pre_norm" else x
+        ff_output = self.feedforward(ff_input)
+        x = x + self.dropout2(ff_output)
+        if self.residual_layout == "post_norm":
+            x = self.norm2(x)
+        return x
 
 
 class TransformerDecoderStack(nn.Module):
@@ -329,6 +389,8 @@ class TransformerDecoderStack(nn.Module):
         dim_feedforward: int,
         dropout: float,
         activation: str,
+        norm_type: str,
+        residual_layout: str,
         position_encoding_type: str,
         max_length: int,
         rope_theta: float,
@@ -342,6 +404,8 @@ class TransformerDecoderStack(nn.Module):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             activation=activation,
+            norm_type=norm_type,
+            residual_layout=residual_layout,
             position_encoding_type=position_encoding_type,
             max_length=max_length,
             rope_theta=rope_theta,
@@ -349,7 +413,7 @@ class TransformerDecoderStack(nn.Module):
             rope_original_max_length=rope_original_max_length,
         )
         self.layers = nn.ModuleList(copy.deepcopy(layer) for _ in range(num_layers))
-        self.norm = nn.LayerNorm(d_model)
+        self.norm = build_norm(norm_type, d_model)
 
     def forward(
         self,
@@ -390,6 +454,8 @@ class TransformerDecoderLM(nn.Module):
             dim_feedforward=config.dim_feedforward,
             dropout=config.dropout,
             activation=config.activation,
+            norm_type=config.norm_type,
+            residual_layout=config.residual_layout,
             position_encoding_type=config.position_encoding_type,
             max_length=config.max_length,
             rope_theta=config.rope_theta,
@@ -398,6 +464,8 @@ class TransformerDecoderLM(nn.Module):
         )
         self.output_projection = nn.Linear(config.d_model, config.vocab_size)
         self.reset_parameters()
+        if config.tie_embeddings:
+            self.output_projection.weight = self.tgt_embedding.weight
 
     def reset_parameters(self) -> None:
         for parameter in self.parameters():
