@@ -8,7 +8,7 @@ model:
   activation: swiglu
   norm_type: rmsnorm
   residual_layout: pre_norm
-  tie_embeddings: false
+  tie_embeddings: true
   position_encoding_type: sinusoidal
   pad_token_id: 0
   bos_token_id: 1
