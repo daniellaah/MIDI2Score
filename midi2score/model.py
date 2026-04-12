@@ -18,6 +18,7 @@ class DecoderLanguageModelConfig:
     dim_feedforward: int = 1024
     dropout: float = 0.1
     activation: str = "relu"
+    positional_encoding: str = "sinusoidal"
     pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
@@ -28,6 +29,8 @@ class DecoderLanguageModelConfig:
             raise ValueError("d_model must be divisible by nhead.")
         if self.activation not in {"relu", "gelu", "swiglu", "geglu"}:
             raise ValueError("activation must be relu, gelu, swiglu, or geglu.")
+        if self.positional_encoding != "sinusoidal":
+            raise ValueError("positional_encoding must be sinusoidal.")
 
     def to_dict(self) -> dict[str, int | float | str]:
         return asdict(self)
@@ -47,6 +50,12 @@ class SinusoidalPositionalEncoding(nn.Module):
 
     def forward(self, tokens: Tensor) -> Tensor:
         return self.encoding[:, : tokens.size(1)]
+
+
+def build_positional_encoding(positional_encoding: str, d_model: int, max_length: int) -> nn.Module:
+    if positional_encoding == "sinusoidal":
+        return SinusoidalPositionalEncoding(d_model, max_length)
+    raise ValueError(f"Unsupported positional_encoding {positional_encoding!r}.")
 
 
 def build_causal_mask(sequence_length: int, device: torch.device | str) -> Tensor:
@@ -197,7 +206,11 @@ class TransformerDecoderLM(nn.Module):
             embedding_dim=config.d_model,
             padding_idx=config.pad_token_id,
         )
-        self.position_encoding = SinusoidalPositionalEncoding(config.d_model, config.max_length)
+        self.position_encoding = build_positional_encoding(
+            config.positional_encoding,
+            config.d_model,
+            config.max_length,
+        )
         self.dropout = nn.Dropout(config.dropout)
         self.decoder = TransformerDecoderStack(
             d_model=config.d_model,

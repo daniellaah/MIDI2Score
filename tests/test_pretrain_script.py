@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import subprocess
 
 
@@ -67,3 +68,9 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
     assert (run_dir / "summary.json").exists()
     assert (run_dir / "config.yaml").exists()
     assert (run_dir / "train.csv").exists()
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert "average_step_time_seconds" in summary["result"]
+    assert "average_tokens_per_second" in summary["result"]
+    assert "mps_peak_memory_bytes" in summary["result"]
+    assert "target_validation_loss" in summary["result"]
+    assert "time_to_target_validation_loss_seconds" in summary["result"]

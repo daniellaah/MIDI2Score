@@ -84,8 +84,19 @@ def main() -> None:
         f"average_step_time_seconds={result.average_step_time_seconds:.4f} "
         f"average_tokens_per_second={result.average_tokens_per_second:.1f}"
     )
+    if result.mps_peak_memory_bytes is not None:
+        print(f"mps_peak_memory_mib={result.mps_peak_memory_bytes / (1024 * 1024):.1f}")
     if result.best_validation_loss is not None:
         print(f"best validation loss {result.best_validation_loss:.4f}")
+    if result.target_validation_loss is not None:
+        print(f"target_validation_loss={result.target_validation_loss:.4f}")
+        if result.time_to_target_validation_loss_seconds is None:
+            print("time_to_target_validation_loss_seconds=not_reached")
+        else:
+            print(
+                "time_to_target_validation_loss_seconds="
+                f"{result.time_to_target_validation_loss_seconds:.2f}"
+            )
     print(f"saved checkpoint to {(run_dir / 'latest.pt').resolve()}")
     print(f"saved best checkpoint to {(run_dir / 'best.pt').resolve()}")
     print(f"saved summary to {summary_path.resolve()}")

@@ -10,10 +10,12 @@ from midi2score.data import (
     LmxDataConfig,
     LengthBucketBatchSampler,
     build_language_model_dataloader,
+    collate_language_model_batch,
 )
 from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 from midi2score.train import (
     DecoderEvaluationMetrics,
+    MpsMemoryTracker,
     TrainingConfig,
     build_lr_scheduler,
     evaluate_decoder_language_model,
@@ -119,7 +121,7 @@ def test_validation_sliding_window_scores_each_target_token_once() -> None:
 def test_length_bucket_batch_sampler_groups_examples_by_length() -> None:
     config = LmxDataConfig(
         dataset_path="data/huggingface",
-        split="training",
+        split="validation",
         max_length=64,
         sliding_window_stride=32,
         length_bucketing=True,
@@ -136,6 +138,157 @@ def test_length_bucket_batch_sampler_groups_examples_by_length() -> None:
     lengths = [dataset.sequence_length(index) for index in batch_indices]
 
     assert lengths == sorted(lengths, reverse=True)
+
+
+def test_length_bucket_batch_sampler_respects_max_tokens_per_batch() -> None:
+    config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=64,
+        sliding_window_stride=32,
+        length_bucketing=True,
+        max_tokens_per_batch=128,
+    )
+    dataset = LmxSlidingWindowDataset(config)
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=8,
+        seed=23,
+        shuffle=False,
+        max_tokens_per_batch=config.max_tokens_per_batch,
+    )
+
+    for batch_indices in sampler:
+        lengths = [dataset.sequence_length(index) for index in batch_indices]
+        assert max(lengths) * len(batch_indices) <= 128
+
+
+def test_length_bucket_batch_sampler_respects_required_batch_size_multiple() -> None:
+    config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=256,
+        sliding_window_stride=128,
+        max_tokens_per_batch=1024,
+        required_batch_size_multiple=4,
+    )
+    dataset = LmxSlidingWindowDataset(config)
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=8,
+        seed=23,
+        shuffle=False,
+        max_tokens_per_batch=config.max_tokens_per_batch,
+    )
+
+    batch_sizes = []
+    for batch_index, batch_indices in enumerate(sampler):
+        batch_sizes.append(len(batch_indices))
+        if batch_index >= 49:
+            break
+
+    assert any(batch_size % 4 == 0 for batch_size in batch_sizes)
+    assert all(batch_size == 8 or batch_size == 4 for batch_size in batch_sizes)
+
+
+def test_language_model_dataloader_supports_dynamic_batch_size_with_token_budget() -> None:
+    data_config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=256,
+        sliding_window_stride=128,
+        max_tokens_per_batch=512,
+    )
+    loader = build_language_model_dataloader(data_config, batch_size=8, seed=0, shuffle=False)
+
+    batch_sizes: list[int] = []
+    for batch_index, batch in enumerate(loader):
+        batch_sizes.append(batch.input_tokens.size(0))
+        padded_token_length = batch.input_tokens.size(1) + 1
+        assert padded_token_length * batch.input_tokens.size(0) <= 512
+        if batch_index >= 49:
+            break
+
+    assert len(batch_sizes) > 1
+    assert len(set(batch_sizes)) > 1
+
+
+def test_collate_language_model_batch_supports_pad_to_length_multiple() -> None:
+    examples = [
+        {
+            "tokens": torch.tensor([1, 2, 3, 4, 5], dtype=torch.long),
+            "loss_mask": torch.tensor([True, True, True, True], dtype=torch.bool),
+        },
+        {
+            "tokens": torch.tensor([1, 2, 3], dtype=torch.long),
+            "loss_mask": torch.tensor([True, True], dtype=torch.bool),
+        },
+    ]
+
+    batch = collate_language_model_batch(examples, pad_to_length_multiple=8)
+
+    assert batch.input_tokens.shape[1] + 1 == 8
+    assert batch.output_tokens.shape[1] + 1 == 8
+    assert batch.loss_mask is not None
+    assert batch.loss_mask.shape[1] == 7
+
+
+def test_length_bucket_batch_sampler_supports_padding_noise() -> None:
+    baseline_config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=256,
+        sliding_window_stride=128,
+        length_bucketing=True,
+    )
+    noisy_config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=256,
+        sliding_window_stride=128,
+        length_bucketing=True,
+        bucket_padding_noise=0.5,
+    )
+    baseline_dataset = LmxSlidingWindowDataset(baseline_config)
+    noisy_dataset = LmxSlidingWindowDataset(noisy_config)
+    baseline_sampler = LengthBucketBatchSampler(
+        dataset=baseline_dataset,
+        batch_size=8,
+        seed=23,
+        shuffle=True,
+    )
+    noisy_sampler = LengthBucketBatchSampler(
+        dataset=noisy_dataset,
+        batch_size=8,
+        seed=23,
+        shuffle=True,
+    )
+
+    baseline_batch = next(iter(baseline_sampler))
+    noisy_batch = next(iter(noisy_sampler))
+
+    assert len(noisy_batch) == 8
+    assert baseline_batch != noisy_batch
+
+
+def test_length_bucket_batch_sampler_len_matches_iteration_with_shuffle() -> None:
+    config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="validation",
+        max_length=256,
+        sliding_window_stride=128,
+        max_tokens_per_batch=512,
+    )
+    dataset = LmxSlidingWindowDataset(config)
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=8,
+        seed=23,
+        shuffle=True,
+        max_tokens_per_batch=config.max_tokens_per_batch,
+    )
+
+    assert len(sampler) == sum(1 for _ in sampler)
 
 
 def test_decoder_language_model_forward_produces_vocab_logits() -> None:
@@ -229,6 +382,7 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
         log_every=10,
         eval_every=1,
         num_eval_batches=1,
+        target_validation_loss=100.0,
         device="cpu",
         save_checkpoint_path=str(checkpoint_path),
         save_best_checkpoint_path=str(best_checkpoint_path),
@@ -252,8 +406,44 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     assert any(row[1] == "validation" and row[2] == "perplexity" for row in rows[1:])
     assert any(row[1] == "validation" and row[2] == "token_accuracy" for row in rows[1:])
     assert any(row[1] == "validation" and row[2] == "top5_accuracy" for row in rows[1:])
+    assert any(row[1] == "validation" and row[2] == "time_to_target_validation_loss_seconds" for row in rows[1:])
     assert result.average_step_time_seconds > 0.0
     assert result.average_tokens_per_second > 0.0
+    assert result.target_validation_loss == pytest.approx(100.0)
+    assert result.time_to_target_validation_loss_seconds is not None
+    assert result.time_to_target_validation_loss_seconds <= result.elapsed_seconds
+    assert result.mps_peak_memory_bytes is None
+
+
+def test_decoder_pretraining_loop_supports_bf16_autocast() -> None:
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=5000,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        max_length=64,
+    )
+    data_config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=64,
+        sliding_window_stride=32,
+    )
+    training_config = TrainingConfig(
+        seed=0,
+        batch_size=4,
+        num_steps=1,
+        log_every=10,
+        eval_every=0,
+        precision="bf16",
+        device="cpu",
+    )
+
+    result = run_decoder_pretraining_loop(model_config, data_config, training_config)
+
+    assert len(result.losses) == 1
+    assert result.device == "cpu"
 
 
 def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
@@ -399,6 +589,25 @@ def test_evaluate_decoder_language_model_metrics_respects_loss_mask() -> None:
 
     assert metrics.loss == pytest.approx(expected_loss)
     assert metrics.evaluated_tokens == 2
+
+
+def test_mps_memory_tracker_records_peak_driver_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not hasattr(torch, "mps") or not hasattr(torch.mps, "driver_allocated_memory"):
+        pytest.skip("torch.mps driver memory tracking is unavailable")
+
+    tracker = MpsMemoryTracker(enabled=True)
+    observed_memory = iter([128, 64, 512, 256])
+    monkeypatch.setattr(
+        "torch.mps.driver_allocated_memory",
+        lambda: next(observed_memory),
+    )
+
+    tracker.record()
+    tracker.record()
+    tracker.record()
+    tracker.record()
+
+    assert tracker.peak_memory_bytes == 512
 
 
 def test_decoder_dropout_is_active_only_in_train_mode() -> None:

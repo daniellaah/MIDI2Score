@@ -49,6 +49,26 @@ def test_training_config_requires_eval_for_early_stopping() -> None:
         TrainingConfig(early_stopping_patience=3, eval_every=0)
 
 
+def test_training_config_rejects_negative_target_validation_loss() -> None:
+    with pytest.raises(ValueError, match="target_validation_loss"):
+        TrainingConfig(target_validation_loss=-0.1, eval_every=1)
+
+
+def test_training_config_requires_eval_for_target_validation_loss() -> None:
+    with pytest.raises(ValueError, match="eval_every > 0"):
+        TrainingConfig(target_validation_loss=1.0, eval_every=0)
+
+
+def test_training_config_rejects_unknown_precision() -> None:
+    with pytest.raises(ValueError, match="precision"):
+        TrainingConfig(precision="fp16")
+
+
 def test_decoder_language_model_config_rejects_unknown_activation() -> None:
     with pytest.raises(ValueError, match="activation"):
         DecoderLanguageModelConfig(vocab_size=128, activation="swish")
+
+
+def test_decoder_language_model_config_rejects_unknown_positional_encoding() -> None:
+    with pytest.raises(ValueError, match="positional_encoding"):
+        DecoderLanguageModelConfig(vocab_size=128, positional_encoding="rope")

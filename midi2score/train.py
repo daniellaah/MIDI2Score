@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
@@ -34,6 +35,8 @@ class TrainingConfig:
     log_every: int = 1
     eval_every: int = 0
     num_eval_batches: int | None = None
+    target_validation_loss: float | None = None
+    precision: str = "fp32"
     device: str = "auto"
     save_checkpoint_path: str | None = None
     save_best_checkpoint_path: str | None = None
@@ -70,6 +73,12 @@ class TrainingConfig:
             raise ValueError("early_stopping_patience requires eval_every > 0.")
         if self.num_eval_batches is not None and self.num_eval_batches <= 0:
             raise ValueError("num_eval_batches must be positive.")
+        if self.target_validation_loss is not None and self.target_validation_loss < 0.0:
+            raise ValueError("target_validation_loss must be non-negative.")
+        if self.target_validation_loss is not None and self.eval_every == 0:
+            raise ValueError("target_validation_loss requires eval_every > 0.")
+        if self.precision not in {"fp32", "bf16"}:
+            raise ValueError("precision must be fp32 or bf16.")
         if self.resume_checkpoint_path is not None and not Path(self.resume_checkpoint_path).exists():
             raise ValueError(f"resume_checkpoint_path does not exist: {self.resume_checkpoint_path}")
 
@@ -102,6 +111,9 @@ class DecoderPretrainingResult:
     stopped_due_to_early_stopping: bool
     average_step_time_seconds: float
     average_tokens_per_second: float
+    target_validation_loss: float | None
+    time_to_target_validation_loss_seconds: float | None
+    mps_peak_memory_bytes: int | None
 
 
 @dataclass(slots=True)
@@ -141,6 +153,24 @@ class TrainingLogger:
         if self._writer is not None:
             self._writer.close()
 
+
+@dataclass(slots=True)
+class MpsMemoryTracker:
+    enabled: bool
+    peak_memory_bytes: int = 0
+
+    @classmethod
+    def for_device(cls, device: torch.device | str) -> "MpsMemoryTracker":
+        return cls(enabled=_supports_mps_memory_tracking(device))
+
+    def record(self) -> None:
+        if not self.enabled:
+            return
+        self.peak_memory_bytes = max(
+            self.peak_memory_bytes,
+            int(torch.mps.driver_allocated_memory()),
+        )
+
 def resolve_device(requested_device: str) -> str:
     if requested_device != "auto":
         return requested_device
@@ -149,6 +179,23 @@ def resolve_device(requested_device: str) -> str:
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def _supports_mps_memory_tracking(device: torch.device | str) -> bool:
+    if str(device) != "mps":
+        return False
+    if not hasattr(torch, "mps"):
+        return False
+    return hasattr(torch.mps, "driver_allocated_memory")
+
+
+def build_autocast_context(device: torch.device | str, precision: str):
+    device_type = str(device)
+    if precision == "fp32":
+        return nullcontext()
+    if precision == "bf16":
+        return torch.autocast(device_type=device_type, dtype=torch.bfloat16)
+    raise ValueError(f"Unsupported precision {precision!r}.")
 
 
 def save_checkpoint(path: str, payload: dict) -> None:
@@ -207,6 +254,8 @@ def evaluate_decoder_language_model(
     pad_token_id: int,
     device: torch.device | str,
     num_batches: int | None = None,
+    mps_memory_tracker: MpsMemoryTracker | None = None,
+    precision: str = "fp32",
 ) -> float:
     return evaluate_decoder_language_model_metrics(
         model,
@@ -214,6 +263,8 @@ def evaluate_decoder_language_model(
         pad_token_id=pad_token_id,
         device=device,
         num_batches=num_batches,
+        mps_memory_tracker=mps_memory_tracker,
+        precision=precision,
     ).loss
 
 
@@ -224,6 +275,8 @@ def evaluate_decoder_language_model_metrics(
     pad_token_id: int,
     device: torch.device | str,
     num_batches: int | None = None,
+    mps_memory_tracker: MpsMemoryTracker | None = None,
+    precision: str = "fp32",
 ) -> DecoderEvaluationMetrics:
     model.eval()
     total_loss = 0.0
@@ -234,7 +287,12 @@ def evaluate_decoder_language_model_metrics(
     with torch.no_grad():
         for batch_index, batch in enumerate(loader, start=1):
             batch = batch.to(device)
-            logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+            if mps_memory_tracker is not None:
+                mps_memory_tracker.record()
+            with build_autocast_context(device, precision):
+                logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+            if mps_memory_tracker is not None:
+                mps_memory_tracker.record()
             flat_targets = batch.output_tokens.reshape(-1)
             valid_mask = flat_targets.ne(pad_token_id)
             if batch.loss_mask is not None:
@@ -244,7 +302,7 @@ def evaluate_decoder_language_model_metrics(
                 flat_logits = logits.reshape(-1, logits.size(-1))[valid_mask]
                 total_loss += float(
                     F.cross_entropy(
-                        flat_logits,
+                        flat_logits.float(),
                         valid_targets,
                         reduction="sum",
                     ).item()
@@ -292,6 +350,8 @@ def run_decoder_pretraining_loop(
         )
 
     model = TransformerDecoderLM(model_config).to(device)
+    mps_memory_tracker = MpsMemoryTracker.for_device(device)
+    mps_memory_tracker.record()
     optimizer = AdamW(
         model.parameters(),
         lr=training_config.learning_rate,
@@ -330,6 +390,7 @@ def run_decoder_pretraining_loop(
     final_step = start_step
     stopped_due_to_time_budget = False
     stopped_due_to_early_stopping = False
+    time_to_target_validation_loss_seconds: float | None = None
 
     try:
         for step in range(start_step + 1, training_config.num_steps + 1):
@@ -349,17 +410,22 @@ def run_decoder_pretraining_loop(
             model.train()
             optimizer.zero_grad(set_to_none=True)
             batch = batch.to(device)
+            mps_memory_tracker.record()
             step_started_at = time.monotonic()
-            logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+            with build_autocast_context(device, training_config.precision):
+                logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+            mps_memory_tracker.record()
             loss = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
+                logits.reshape(-1, logits.size(-1)).float(),
                 batch.output_tokens.reshape(-1),
                 ignore_index=model_config.pad_token_id,
             )
             loss.backward()
+            mps_memory_tracker.record()
             clip_grad_norm_(model.parameters(), max_norm=training_config.grad_clip_norm)
             optimizer.step()
             scheduler.step()
+            mps_memory_tracker.record()
 
             step_elapsed_seconds = time.monotonic() - step_started_at
             step_tokens = int(batch.output_tokens.ne(model_config.pad_token_id).sum().item())
@@ -376,6 +442,12 @@ def run_decoder_pretraining_loop(
                 metric="tokens_per_second",
                 value=step_tokens / max(step_elapsed_seconds, 1e-12),
             )
+            if (
+                training_config.max_duration_seconds is not None
+                and time.monotonic() - started_at >= training_config.max_duration_seconds
+            ):
+                stopped_due_to_time_budget = True
+                break
 
             if step % training_config.log_every == 0:
                 print(
@@ -392,6 +464,8 @@ def run_decoder_pretraining_loop(
                     pad_token_id=model_config.pad_token_id,
                     device=device,
                     num_batches=training_config.num_eval_batches,
+                    mps_memory_tracker=mps_memory_tracker,
+                    precision=training_config.precision,
                 )
                 validation_losses.append((step, metrics.loss))
                 logger.log_scalar(step=step, split="validation", value=metrics.loss)
@@ -405,6 +479,18 @@ def run_decoder_pretraining_loop(
                     f"top5_acc={metrics.top5_accuracy:.4f} "
                     f"device={device}"
                 )
+                if (
+                    training_config.target_validation_loss is not None
+                    and time_to_target_validation_loss_seconds is None
+                    and metrics.loss <= training_config.target_validation_loss
+                ):
+                    time_to_target_validation_loss_seconds = time.monotonic() - started_at
+                    logger.log_scalar(
+                        step=step,
+                        split="validation",
+                        metric="time_to_target_validation_loss_seconds",
+                        value=time_to_target_validation_loss_seconds,
+                    )
 
                 improved = best_validation_loss is None or (
                     metrics.loss < best_validation_loss - training_config.early_stopping_min_delta
@@ -443,6 +529,12 @@ def run_decoder_pretraining_loop(
                         f"min_delta={training_config.early_stopping_min_delta}"
                     )
                     break
+                if (
+                    training_config.max_duration_seconds is not None
+                    and time.monotonic() - started_at >= training_config.max_duration_seconds
+                ):
+                    stopped_due_to_time_budget = True
+                    break
     finally:
         logger.close()
 
@@ -478,6 +570,9 @@ def run_decoder_pretraining_loop(
         stopped_due_to_early_stopping=stopped_due_to_early_stopping,
         average_step_time_seconds=cumulative_step_seconds / max(len(losses), 1),
         average_tokens_per_second=cumulative_tokens / max(cumulative_step_seconds, 1e-12),
+        target_validation_loss=training_config.target_validation_loss,
+        time_to_target_validation_loss_seconds=time_to_target_validation_loss_seconds,
+        mps_peak_memory_bytes=mps_memory_tracker.peak_memory_bytes if mps_memory_tracker.enabled else None,
     )
 
 
