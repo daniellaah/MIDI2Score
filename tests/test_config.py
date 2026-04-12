@@ -9,16 +9,6 @@ def test_training_config_rejects_non_positive_time_budget() -> None:
         TrainingConfig(max_duration_seconds=0.0)
 
 
-def test_training_config_rejects_unknown_scheduler() -> None:
-    with pytest.raises(ValueError, match="Unsupported scheduler"):
-        TrainingConfig(scheduler="triangle")
-
-
-def test_training_config_rejects_unknown_optimizer() -> None:
-    with pytest.raises(ValueError, match="optimizer"):
-        TrainingConfig(optimizer="sgd")
-
-
 def test_training_config_rejects_negative_weight_decay() -> None:
     with pytest.raises(ValueError, match="weight_decay"):
         TrainingConfig(weight_decay=-0.1)
@@ -39,11 +29,6 @@ def test_training_config_rejects_non_positive_grad_clip_norm() -> None:
         TrainingConfig(grad_clip_norm=0.0)
 
 
-def test_training_config_rejects_invalid_label_smoothing() -> None:
-    with pytest.raises(ValueError, match="label_smoothing"):
-        TrainingConfig(label_smoothing=1.0)
-
-
 def test_training_config_rejects_negative_warmup_steps() -> None:
     with pytest.raises(ValueError, match="warmup_steps"):
         TrainingConfig(warmup_steps=-1)
@@ -62,24 +47,6 @@ def test_training_config_rejects_non_positive_early_stopping_patience() -> None:
 def test_training_config_requires_eval_for_early_stopping() -> None:
     with pytest.raises(ValueError, match="eval_every > 0"):
         TrainingConfig(early_stopping_patience=3, eval_every=0)
-
-
-def test_decoder_language_model_config_rejects_unknown_position_encoding() -> None:
-    with pytest.raises(ValueError, match="position_encoding_type"):
-        DecoderLanguageModelConfig(
-            vocab_size=128,
-            position_encoding_type="dynamic_ntk",
-        )
-
-
-def test_decoder_language_model_config_rejects_unknown_norm_type() -> None:
-    with pytest.raises(ValueError, match="norm_type"):
-        DecoderLanguageModelConfig(vocab_size=128, norm_type="batchnorm")
-
-
-def test_decoder_language_model_config_rejects_unknown_residual_layout() -> None:
-    with pytest.raises(ValueError, match="residual_layout"):
-        DecoderLanguageModelConfig(vocab_size=128, residual_layout="sandwich")
 
 
 def test_decoder_language_model_config_rejects_unknown_activation() -> None:

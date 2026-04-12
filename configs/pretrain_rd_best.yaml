@@ -6,10 +6,6 @@ model:
   dim_feedforward: 2048
   dropout: 0.05
   activation: swiglu
-  norm_type: rmsnorm
-  residual_layout: pre_norm
-  tie_embeddings: true
-  position_encoding_type: sinusoidal
   pad_token_id: 0
   bos_token_id: 1
   eos_token_id: 2
@@ -24,14 +20,11 @@ data:
 training:
   seed: 23
   batch_size: 16
-  optimizer: adamw
   learning_rate: 0.0006
   weight_decay: 0.1
   beta1: 0.9
   beta2: 0.95
   grad_clip_norm: 2.0
-  label_smoothing: 0.0
-  scheduler: cosine
   warmup_steps: 500
   min_lr_ratio: 0.1
   num_steps: 1000000

@@ -151,27 +151,8 @@ def test_decoder_language_model_forward_produces_vocab_logits() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("position_encoding_type", "norm_type", "residual_layout", "activation"),
-    [
-        ("sinusoidal", "layernorm", "post_norm", "relu"),
-        ("learned", "layernorm", "post_norm", "relu"),
-        ("alibi", "layernorm", "post_norm", "relu"),
-        ("rope", "layernorm", "post_norm", "relu"),
-        ("rope_ntk", "layernorm", "post_norm", "relu"),
-        ("sinusoidal", "layernorm", "pre_norm", "relu"),
-        ("sinusoidal", "rmsnorm", "post_norm", "relu"),
-        ("sinusoidal", "rmsnorm", "pre_norm", "relu"),
-        ("sinusoidal", "layernorm", "post_norm", "swiglu"),
-        ("sinusoidal", "layernorm", "post_norm", "geglu"),
-    ],
-)
-def test_decoder_language_model_supports_model_variants(
-    position_encoding_type: str,
-    norm_type: str,
-    residual_layout: str,
-    activation: str,
-) -> None:
+@pytest.mark.parametrize(("activation",), [("relu",), ("gelu",), ("swiglu",), ("geglu",)])
+def test_decoder_language_model_supports_activation_variants(activation: str) -> None:
     model_config, batch = build_small_real_batch()
     model_config = DecoderLanguageModelConfig(
         vocab_size=model_config.vocab_size,
@@ -180,9 +161,6 @@ def test_decoder_language_model_supports_model_variants(
         num_layers=model_config.num_layers,
         dim_feedforward=model_config.dim_feedforward,
         max_length=model_config.max_length,
-        position_encoding_type=position_encoding_type,
-        norm_type=norm_type,
-        residual_layout=residual_layout,
         activation=activation,
     )
     model = TransformerDecoderLM(model_config)
@@ -192,17 +170,8 @@ def test_decoder_language_model_supports_model_variants(
     assert logits.shape[-1] == model_config.vocab_size
 
 
-def test_decoder_language_model_supports_tied_embeddings() -> None:
+def test_decoder_language_model_always_ties_embeddings() -> None:
     model_config, batch = build_small_real_batch()
-    model_config = DecoderLanguageModelConfig(
-        vocab_size=model_config.vocab_size,
-        d_model=model_config.d_model,
-        nhead=model_config.nhead,
-        num_layers=model_config.num_layers,
-        dim_feedforward=model_config.dim_feedforward,
-        max_length=model_config.max_length,
-        tie_embeddings=True,
-    )
     model = TransformerDecoderLM(model_config)
 
     logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
@@ -254,11 +223,9 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     training_config = TrainingConfig(
         seed=0,
         batch_size=4,
-        optimizer="adamw",
         num_steps=2,
         weight_decay=0.01,
         grad_clip_norm=1.0,
-        label_smoothing=0.1,
         log_every=10,
         eval_every=1,
         num_eval_batches=1,
@@ -511,12 +478,11 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
     assert logged_steps == [3, 4]
 
 
-def test_build_lr_scheduler_creates_warmup_linear_schedule() -> None:
+def test_build_lr_scheduler_creates_warmup_cosine_schedule() -> None:
     parameter = torch.nn.Parameter(torch.ones(1))
     optimizer = torch.optim.Adam([parameter], lr=1.0)
     training_config = TrainingConfig(
         num_steps=10,
-        scheduler="linear",
         warmup_steps=2,
         min_lr_ratio=0.2,
     )
@@ -533,7 +499,7 @@ def test_build_lr_scheduler_creates_warmup_linear_schedule() -> None:
     assert observed_lrs[0] == pytest.approx(0.5)
     assert observed_lrs[1] == pytest.approx(1.0)
     assert observed_lrs[2] < observed_lrs[1]
-    assert observed_lrs[-1] >= 0.2
+    assert observed_lrs[-1] > 0.2
 
 
 def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
@@ -559,7 +525,6 @@ def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
         num_steps=2,
         log_every=10,
         eval_every=0,
-        scheduler="linear",
         warmup_steps=1,
         min_lr_ratio=0.5,
         device="cpu",
@@ -573,7 +538,6 @@ def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
         num_steps=3,
         log_every=10,
         eval_every=0,
-        scheduler="linear",
         warmup_steps=1,
         min_lr_ratio=0.5,
         device="cpu",

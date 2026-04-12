@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import Adam, AdamW, Optimizer
+from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
@@ -20,14 +20,11 @@ from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 class TrainingConfig:
     seed: int = 0
     batch_size: int = 8
-    optimizer: str = "adam"
     learning_rate: float = 1e-3
     beta1: float = 0.9
     beta2: float = 0.999
     weight_decay: float = 0.0
-    grad_clip_norm: float | None = None
-    label_smoothing: float = 0.0
-    scheduler: str = "none"
+    grad_clip_norm: float = 2.0
     warmup_steps: int = 0
     min_lr_ratio: float = 0.0
     num_steps: int = 10
@@ -49,8 +46,6 @@ class TrainingConfig:
             raise ValueError("seed must be non-negative.")
         if self.batch_size <= 0:
             raise ValueError("batch_size must be positive.")
-        if self.optimizer not in {"adam", "adamw"}:
-            raise ValueError("optimizer must be adam or adamw.")
         if self.learning_rate <= 0.0:
             raise ValueError("learning_rate must be positive.")
         if not 0.0 < self.beta1 < 1.0:
@@ -59,12 +54,8 @@ class TrainingConfig:
             raise ValueError("beta2 must be in (0.0, 1.0).")
         if self.weight_decay < 0.0:
             raise ValueError("weight_decay must be non-negative.")
-        if self.grad_clip_norm is not None and self.grad_clip_norm <= 0.0:
+        if self.grad_clip_norm <= 0.0:
             raise ValueError("grad_clip_norm must be positive.")
-        if not 0.0 <= self.label_smoothing < 1.0:
-            raise ValueError("label_smoothing must be in [0.0, 1.0).")
-        if self.scheduler not in {"none", "linear", "cosine"}:
-            raise ValueError(f"Unsupported scheduler {self.scheduler!r}.")
         if self.warmup_steps < 0:
             raise ValueError("warmup_steps must be non-negative.")
         if not 0.0 <= self.min_lr_ratio <= 1.0:
@@ -192,25 +183,17 @@ def load_checkpoint_for_resume(
 
 
 def build_lr_scheduler(optimizer: Optimizer, training_config: TrainingConfig) -> LambdaLR | None:
-    if training_config.scheduler == "none" and training_config.warmup_steps == 0:
-        return None
-
     total_steps = training_config.num_steps
     warmup_steps = training_config.warmup_steps
     min_lr_ratio = training_config.min_lr_ratio
-    scheduler_name = training_config.scheduler
 
     def lr_lambda(step: int) -> float:
         current_step = max(step, 1)
         if warmup_steps > 0 and current_step <= warmup_steps:
             return current_step / warmup_steps
-        if scheduler_name == "none":
-            return 1.0
         decay_start = max(warmup_steps, 1)
         decay_steps = max(total_steps - decay_start, 1)
         progress = min(max((current_step - decay_start) / decay_steps, 0.0), 1.0)
-        if scheduler_name == "linear":
-            return 1.0 - progress * (1.0 - min_lr_ratio)
         cosine = 0.5 * (1.0 + torch.cos(torch.tensor(progress * torch.pi))).item()
         return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
@@ -309,8 +292,7 @@ def run_decoder_pretraining_loop(
         )
 
     model = TransformerDecoderLM(model_config).to(device)
-    optimizer_cls = Adam if training_config.optimizer == "adam" else AdamW
-    optimizer = optimizer_cls(
+    optimizer = AdamW(
         model.parameters(),
         lr=training_config.learning_rate,
         betas=(training_config.beta1, training_config.beta2),
@@ -373,14 +355,11 @@ def run_decoder_pretraining_loop(
                 logits.reshape(-1, logits.size(-1)),
                 batch.output_tokens.reshape(-1),
                 ignore_index=model_config.pad_token_id,
-                label_smoothing=training_config.label_smoothing,
             )
             loss.backward()
-            if training_config.grad_clip_norm is not None:
-                clip_grad_norm_(model.parameters(), max_norm=training_config.grad_clip_norm)
+            clip_grad_norm_(model.parameters(), max_norm=training_config.grad_clip_norm)
             optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
+            scheduler.step()
 
             step_elapsed_seconds = time.monotonic() - step_started_at
             step_tokens = int(batch.output_tokens.ne(model_config.pad_token_id).sum().item())
