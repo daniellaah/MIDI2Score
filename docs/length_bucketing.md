@@ -136,69 +136,52 @@ If the target GPU has less memory, batch size will not shrink automatically. The
 
 ## Experiment Results
 
-The tables below summarize completed `600s` experiments. They are split into two rounds:
+The table below summarizes the latest `600s` reruns after:
 
-- the first round compares baseline batching variants
-- the second round refines the `length bucketing + max_tokens_per_batch` setup
+- removing the temporary `RoPE` path
+- tightening wall-clock budget checks
 
-### Round 1: 600s Comparisons
+Because some faster runs can still finish a validation pass after the `600s` boundary, the fairest comparison is the first shared validation point at `step=500`.
 
-| valid_loss | toks/sec | step time | peak mem | description |
-| ---: | ---: | ---: | ---: | --- |
-| 4.8384 | 24312.8 | 0.4569s | 35651.4 MiB | baseline |
-| 5.0415 | 26516.9 | 0.4119s | 91096.5 MiB | baseline, length bucketing |
-| 3.4203 | 27036.9 | 0.4096s | 40617.4 MiB | baseline, BF16, but this run actually reached `698.0s`, so it is not a strict `600s` comparison |
-| 4.8276 | 22640.1 | 0.4815s | 40245.1 MiB | baseline, `max_tokens_per_batch=16384`, `batch_size` upper bound = 64 |
-| 4.6188 | 28326.0 | 0.5516s | 110888.1 MiB | baseline, `length bucketing + max_tokens_per_batch=16384`, `batch_size` upper bound = 64 |
-| 4.6183 | 29162.9 | 0.5358s | 107245.0 MiB | baseline, `length bucketing + max_tokens_per_batch=16384 + BF16`, `batch_size` upper bound = 64 |
-
-Round 1 takeaways:
-
-- `length bucketing` alone did not improve validation loss.
-- `max_tokens_per_batch` alone also did not help.
-- `length bucketing + max_tokens_per_batch` was the first clearly useful combination.
-- In these runs, `BF16` mainly improved throughput rather than optimization quality at matched step count.
-
-### Round 2: 600s Comparisons
-
-This round starts from `length bucketing + max_tokens_per_batch=16384` and adds:
-
-- `bucket_padding_noise`
-- `pad_to_length_multiple`
-- `BF16`
-- `required_batch_size_multiple`
-
-Experiments 4 and 5 ran longer than `600s` because higher throughput allowed them to reach additional steps before the time-budget check stopped the run. For a fair comparison, the most reliable shared checkpoint is the validation loss at `step=500`.
+### Latest 600s Comparison
 
 | exp | step500 val loss | toks/sec | step time | peak mem | description |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 1 | 4.6188 | 26347.2 | 0.5922s | 109965.4 MiB | `length bucketing + max_tokens_per_batch=16384` |
-| 2 | 4.6159 | 27640.1 | 0.5623s | 126557.2 MiB | exp1 + `bucket_padding_noise=0.1` |
-| 3 | 4.6186 | 31215.5 | 0.4953s | 107742.1 MiB | exp2 + `pad_to_length_multiple=64` |
-| 4 | 4.6178 | 36504.7 | 0.4222s | 114190.6 MiB | exp3 + `BF16` |
-| 5 | 4.6056 | 37594.7 | 0.4053s | 100410.6 MiB | exp4 + `required_batch_size_multiple=4` |
+| 1 | 4.8384 | 26362.6 | 0.4204s | 35769.2 MiB | baseline |
+| 2 | 4.8389 | 28188.5 | 0.3929s | 41051.4 MiB | baseline + `BF16` |
+| 3 | 4.6188 | 31991.4 | 0.4889s | 117543.9 MiB | `length bucketing + max_tokens_per_batch=16384` |
+| 4 | 4.6186 | 32903.6 | 0.4679s | 107644.5 MiB | exp3 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
+| 5 | 4.6181 | 38484.7 | 0.4005s | 114694.6 MiB | exp4 + `BF16` |
+| 6 | 4.6071 | 41843.8 | 0.3635s | 99514.6 MiB | exp5 + `required_batch_size_multiple=4` |
 
-Run-level best validation losses:
+### Run-Level Best Metrics
+
+These values are still useful for operational monitoring, but they should not be used as the primary fairness metric for fixed-wall-clock comparisons when some runs evaluate past the budget boundary.
 
 | exp | best val loss | elapsed | final step | description |
 | --- | ---: | ---: | ---: | --- |
-| 1 | 4.6188 | 600.7s | 603 | `length bucketing + max_tokens_per_batch=16384` |
-| 2 | 4.6159 | 600.3s | 611 | exp1 + `bucket_padding_noise=0.1` |
-| 3 | 4.6186 | 600.9s | 821 | exp2 + `pad_to_length_multiple=64` |
-| 4 | 3.1281 | 678.1s | 1000 | exp3 + `BF16` |
-| 5 | 3.0582 | 647.3s | 1000 | exp4 + `required_batch_size_multiple=4` |
+| 1 | 4.8384 | 600.0s | 951 | baseline |
+| 2 | 3.4196 | 660.8s | 1000 | baseline + `BF16` |
+| 3 | 4.6188 | 600.4s | 809 | `length bucketing + max_tokens_per_batch=16384` |
+| 4 | 4.6186 | 601.4s | 908 | exp3 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
+| 5 | 3.1282 | 644.6s | 1000 | exp4 + `BF16` |
+| 6 | 3.0577 | 600.3s | 1052 | exp5 + `required_batch_size_multiple=4` |
 
-Round 2 takeaways:
+### Takeaways
 
-- `bucket_padding_noise=0.1` gave a small positive gain.
-- `pad_to_length_multiple=64` improved throughput substantially without hurting validation loss.
-- `BF16` further improved throughput, but wall-clock-limited runs then became harder to compare directly by final best validation loss.
-- The most promising direction so far is:
-  - `length_bucketing = true`
-  - `bucket_padding_noise = 0.1`
-  - `max_tokens_per_batch = 16384`
-  - `pad_to_length_multiple = 64`
-  - `required_batch_size_multiple = 4`
+- `length bucketing + max_tokens_per_batch` is clearly better than the plain baseline on both validation loss and throughput.
+- `bucket_padding_noise=0.1` gives a small but consistent gain over rigid length sorting.
+- `pad_to_length_multiple=64` improves throughput without hurting validation loss.
+- `BF16` is mainly a throughput optimization in these comparisons. At matched validation steps, it does not change loss much by itself.
+- `required_batch_size_multiple=4` is the strongest variant so far. In this rerun it improves throughput, lowers peak memory relative to exp5, and gives the best shared `step=500` validation loss.
+
+Current best direction for further batching experiments:
+
+- `length_bucketing = true`
+- `bucket_padding_noise = 0.1`
+- `max_tokens_per_batch = 16384`
+- `pad_to_length_multiple = 64`
+- `required_batch_size_multiple = 4`
 
 ## References
 
