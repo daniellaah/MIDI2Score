@@ -24,6 +24,16 @@ def test_training_config_rejects_negative_weight_decay() -> None:
         TrainingConfig(weight_decay=-0.1)
 
 
+def test_training_config_rejects_invalid_beta1() -> None:
+    with pytest.raises(ValueError, match="beta1"):
+        TrainingConfig(beta1=1.0)
+
+
+def test_training_config_rejects_invalid_beta2() -> None:
+    with pytest.raises(ValueError, match="beta2"):
+        TrainingConfig(beta2=0.0)
+
+
 def test_training_config_rejects_non_positive_grad_clip_norm() -> None:
     with pytest.raises(ValueError, match="grad_clip_norm"):
         TrainingConfig(grad_clip_norm=0.0)

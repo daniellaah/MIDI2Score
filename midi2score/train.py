@@ -22,6 +22,8 @@ class TrainingConfig:
     batch_size: int = 8
     optimizer: str = "adam"
     learning_rate: float = 1e-3
+    beta1: float = 0.9
+    beta2: float = 0.999
     weight_decay: float = 0.0
     grad_clip_norm: float | None = None
     label_smoothing: float = 0.0
@@ -51,6 +53,10 @@ class TrainingConfig:
             raise ValueError("optimizer must be adam or adamw.")
         if self.learning_rate <= 0.0:
             raise ValueError("learning_rate must be positive.")
+        if not 0.0 < self.beta1 < 1.0:
+            raise ValueError("beta1 must be in (0.0, 1.0).")
+        if not 0.0 < self.beta2 < 1.0:
+            raise ValueError("beta2 must be in (0.0, 1.0).")
         if self.weight_decay < 0.0:
             raise ValueError("weight_decay must be non-negative.")
         if self.grad_clip_norm is not None and self.grad_clip_norm <= 0.0:
@@ -307,6 +313,7 @@ def run_decoder_pretraining_loop(
     optimizer = optimizer_cls(
         model.parameters(),
         lr=training_config.learning_rate,
+        betas=(training_config.beta1, training_config.beta2),
         weight_decay=training_config.weight_decay,
     )
     scheduler = build_lr_scheduler(optimizer, training_config)

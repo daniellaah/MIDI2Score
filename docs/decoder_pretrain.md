@@ -1,6 +1,6 @@
 # Decoder Pretraining
 
-Last updated: 2026-04-08
+Last updated: 2026-04-11
 
 ## Overview
 
@@ -8,8 +8,8 @@ This document summarizes the decoder pretraining pipeline for `rd`.
 
 ## Baseline
 
-- Current baseline is still under active tuning.
-- Fill in the accepted baseline only after it is finalized.
+- The current accepted `rd` baseline is tracked in [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md).
+- Keep this document focused on stable methodology and keep tuning history in the experiment log.
 
 ## Design Choices and References
 
