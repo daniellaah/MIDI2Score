@@ -183,6 +183,28 @@ Current best direction for further batching experiments:
 - `pad_to_length_multiple = 64`
 - `required_batch_size_multiple = 4`
 
+### 7200s Follow-Up
+
+The strongest `600s` variant was also rerun for a full `7200s` budget.
+
+Configuration:
+
+- `length_bucketing = true`
+- `bucket_padding_noise = 0.1`
+- `max_tokens_per_batch = 16384`
+- `required_batch_size_multiple = 4`
+- `pad_to_length_multiple = 64`
+- `batch_size = 64`
+- `precision = bf16`
+
+Result:
+
+| best val loss | best step | final step | elapsed | toks/sec | step time | peak mem |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.6485 | 9000 | 10279 | 7200.15s | 35488.1 | 0.4287s | 125480.8 MiB |
+
+Compared with the fixed-batch `7200s` baseline (`1.6735`), this run is a meaningful improvement and supports keeping the batching path active for future work.
+
 ## References
 
 - Hugging Face Trainer: `group_by_length` / `LengthGroupedSampler`

@@ -1,6 +1,6 @@
 # Decoder Pretraining Experiments
 
-Last updated: 2026-04-11
+Last updated: 2026-04-12
 
 ## Usage
 
@@ -64,6 +64,41 @@ Last updated: 2026-04-11
 - elapsed seconds: `7301.52`
 - device: `mps`
 - average tokens per second: `20383.4`
+
+## Latest 7200s Length-Bucketing Result
+
+### Status
+
+- This is the strongest `7200s` result so far.
+- It is better than the current accepted fixed-batch baseline, but it is recorded here as a new result rather than silently replacing the baseline section above.
+
+### Recipe
+
+- start from the `7200s` baseline recipe above
+- `length_bucketing = true`
+- `bucket_padding_noise = 0.1`
+- `max_tokens_per_batch = 16384`
+- `required_batch_size_multiple = 4`
+- `pad_to_length_multiple = 64`
+- `batch_size = 64` as an upper bound on example count
+- `precision = bf16`
+
+### Run
+
+- run dir: [`../artifacts/runs/2026-04-12_15-43-20_035673`](../artifacts/runs/2026-04-12_15-43-20_035673)
+- summary: [`../artifacts/runs/2026-04-12_15-43-20_035673/summary.json`](../artifacts/runs/2026-04-12_15-43-20_035673/summary.json)
+- config snapshot: [`../artifacts/runs/2026-04-12_15-43-20_035673/config.yaml`](../artifacts/runs/2026-04-12_15-43-20_035673/config.yaml)
+
+### Metrics
+
+- best validation loss: `1.6485`
+- best validation step: `9000`
+- final step: `10279`
+- elapsed seconds: `7200.15`
+- device: `mps`
+- average step time: `0.4287s`
+- average tokens per second: `35488.1`
+- MPS peak memory: `125480.8 MiB`
 
 ## Apr 9 7200s Autoresearch Summary
 
@@ -135,6 +170,7 @@ Last updated: 2026-04-11
 
 - The full per-experiment commit/loss table for this round is in [`../exp/apr9-7200.tsv`](../exp/apr9-7200.tsv).
 - Longer-context variants were not compute-fair in practice under the fixed `7200s` wall-clock budget because throughput collapsed too sharply.
+- The `apr9-7200` table now also includes later `7200s` follow-up runs that were evaluated against the same baseline family.
 
 ## Baseline: 3600s
 
