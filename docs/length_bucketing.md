@@ -203,7 +203,14 @@ Result:
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1.6485 | 9000 | 10279 | 7200.15s | 35488.1 | 0.4287s | 125480.8 MiB |
 
-Compared with the fixed-batch `7200s` baseline (`1.6735`), this run is a meaningful improvement and supports keeping the batching path active for future work.
+Compared with the fixed-batch `7200s` baseline:
+
+- baseline best val loss: `1.6735`
+- baseline average tokens per second: `20383.4`
+- length-bucketing variant average tokens per second: `35488.1`
+- throughput improvement: about `74%`
+
+This run is therefore a meaningful improvement in both validation loss and training throughput, and it supports keeping the batching path active for future work.
 
 ## References
 
