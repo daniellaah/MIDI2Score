@@ -33,7 +33,7 @@ training:
   warmup_steps: 500
   min_lr_ratio: 0.1
   num_steps: 1000000
-  max_duration_seconds: 3600
+  max_duration_seconds: 7200
   early_stopping_patience: 20
   early_stopping_min_delta: 0.0
   log_every: 50
