@@ -1,6 +1,6 @@
 # Decoder Pretraining
 
-Last updated: 2026-04-12
+Last updated: 2026-04-13
 
 ## Overview
 
@@ -51,28 +51,12 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
 - length bucketing: disabled in the current best baseline
 - padding: dynamic padding inside each batch with `PAD_TOKEN_ID = 0`
 
-## Current Best Known Variant
+## Current Main Batching Challenger
 
-- This is the strongest `7200s` result so far, but it has not yet been folded into `configs/pretrain_rd_best.yaml`.
-- run: [`../artifacts/runs/2026-04-12_15-43-20_035673`](../artifacts/runs/2026-04-12_15-43-20_035673)
-- summary: [`../artifacts/runs/2026-04-12_15-43-20_035673/summary.json`](../artifacts/runs/2026-04-12_15-43-20_035673/summary.json)
-- best validation loss: `1.6485`
-- best validation step: `9000`
-- final step: `10279`
-- elapsed seconds: `7200.15`
-- average step time: `0.4287s`
-- average tokens per second: `35488.1`
-- MPS peak memory: `125480.8 MiB`
-
-### Additional Data Settings
-
-- `length_bucketing = true`
-- `bucket_padding_noise = 0.1`
-- `max_tokens_per_batch = 16384`
-- `required_batch_size_multiple = 4`
-- `pad_to_length_multiple = 64`
-- `batch_size = 64` as an upper bound on example count
-- `precision = bf16`
+- The current strongest batching challenger under the canonical fixed validation recipe is:
+  `length_bucketing = true + max_tokens_per_batch = 16384 + pad_to_length_multiple = 64`
+- This conclusion comes from the latest `600s` fixed-eval reruns.
+- It has not yet been promoted over the accepted `7200s` fixed-batch baseline.
 
 ## Design Choices and References
 
@@ -80,7 +64,7 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
 | --- | --- | --- | --- |
 | Data source | Tokenized `rd` Hugging Face dataset | Stable training/eval input and reproducible splits | Project dataset pipeline |
 | Sequence handling | Sliding windows with dynamic padding | Covers long sequences while keeping batch compute bounded | [Hugging Face perplexity guide](https://huggingface.co/docs/transformers/en/perplexity) |
-| Training batching | Length bucketing + token-budget batching | Stronger than the fixed-batch baseline under the same `7200s` budget | [AllenNLP MaxTokensBatchSampler](https://docs.allennlp.org/main/api/data/samplers/max_tokens_batch_sampler/) |
+| Training batching | Fixed batch in the accepted baseline; length bucketing + token-budget batching as the main challenger | The strongest current challenger is `length_bucketing + max_tokens_per_batch + pad_to_length_multiple=64` | [AllenNLP MaxTokensBatchSampler](https://docs.allennlp.org/main/api/data/samplers/max_tokens_batch_sampler/) |
 | Model family | Decoder-only Transformer LM | Matches autoregressive next-token pretraining | [Attention Is All You Need](https://arxiv.org/abs/1706.03762) |
 | Norm and residual layout | RMSNorm + Pre-Norm | More stable and better than earlier LayerNorm/Post-Norm baselines in our experiments | [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467) |
 | FFN activation | SwiGLU | Consistently stronger than simpler FFN activations in modern LMs | [GLU Variants Improve Transformer](https://arxiv.org/abs/2002.05202) |
@@ -88,7 +72,7 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
 | Weight tying | Enabled | Reduces parameters and improved our baseline | [Using the Output Embedding to Improve Language Models](https://arxiv.org/abs/1608.05859) |
 | Optimizer | AdamW | Standard decoupled weight decay optimizer for Transformer pretraining | [Decoupled Weight Decay Regularization](https://arxiv.org/abs/1711.05101) |
 | LR schedule | Cosine with warmup | Better than earlier linear/no-schedule variants in our tuning | [SGDR](https://arxiv.org/abs/1608.03983) |
-| Validation loss | Token-weighted average over scored tokens | Correctly averages by effective token count rather than by batch | [Hugging Face perplexity guide](https://huggingface.co/docs/transformers/en/perplexity) |
+| Validation loss | Token-weighted average over scored tokens with fixed-batch validation | Correctly averages by effective token count rather than by batch and keeps cross-run comparison stable | [Hugging Face perplexity guide](https://huggingface.co/docs/transformers/en/perplexity) |
 
 ## End-to-End Pipeline
 
@@ -97,7 +81,7 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
 3. Dynamically pad each batch and construct `input_tokens`, `output_tokens`, `padding_mask`, and `loss_mask`.
 4. Optionally group training windows by approximate length and build batches under a token budget.
 5. Train the decoder LM with next-token cross-entropy.
-6. Evaluate validation loss with token-weighted averaging over all scored validation tokens.
+6. Evaluate validation loss with token-weighted averaging over all scored validation tokens, using fixed-batch validation.
 7. Save `latest.pt`, `best.pt`, `config.yaml`, `summary.json`, and `train.csv` into the run directory.
 
 ## Data and Sequence Handling
@@ -109,6 +93,7 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
 - Training split uses overlapping windows over each stored token sequence.
 - Validation split uses sliding windows plus `loss_mask` so each target token is counted once.
 - Training can additionally use length bucketing and a token-budget batch sampler.
+- Validation intentionally ignores training-side length bucketing and token-budget settings.
 
 ### Special Tokens
 
@@ -128,6 +113,8 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
   - pad sequence length to `pad_to_length_multiple`
 - Validation:
   use sliding windows and compute loss only on newly covered target tokens
+- Validation batching:
+  fixed batch only; keep `eval_batch_size` constant across experiments
 - Loss aggregation:
   average over effective scored tokens, not over batches
 
@@ -164,8 +151,7 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
 
 ### Selection Rule
 
-- compare runs only under the same wall-clock budget
-- for strict wall-clock comparisons involving faster mixed-precision runs, use a shared validation checkpoint such as `step=500`
+- compare runs only under the same wall-clock budget and the same validation protocol
 - primary metric: lowest validation loss
 
 ## Files
@@ -180,6 +166,6 @@ Use [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md) for tuning history and 
 ## Notes
 
 - The current best baseline remains the fixed-batch `configs/pretrain_rd_best.yaml` recipe.
-- The strongest known variant currently adds length bucketing, token-budget batching, and `bf16`.
+- The strongest current challenger adds length bucketing, token-budget batching, and `pad_to_length_multiple = 64`.
 - The sequence length remains fixed at `1024`; longer-context variants were worse under the same `7200s` budget because throughput collapsed too sharply.
 - Keep future tuning history in [`decoder_pretrain_exp.md`](decoder_pretrain_exp.md).

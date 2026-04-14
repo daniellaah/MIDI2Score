@@ -20,7 +20,7 @@ def test_pretrain_script_runs_from_yaml_config(tmp_path: Path) -> None:
                 "  pad_token_id: 0",
                 "  bos_token_id: 1",
                 "  eos_token_id: 2",
-                "  max_length: 64",
+                "  max_length: 1024",
                 "data:",
                 "  dataset_path: data/huggingface",
                 "  split: training",

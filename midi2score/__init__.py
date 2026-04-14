@@ -4,9 +4,9 @@ from midi2score.data import (
     LmxSlidingWindowDataset,
     LmxBatch,
     LmxDataConfig,
-    LengthBucketBatchSampler,
-    build_language_model_dataloader,
-    collate_language_model_batch,
+    LengthBucketedDynamicBatchSampler,
+    build_dataloader,
+    collate_fn,
 )
 from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 from midi2score.train import (
@@ -26,12 +26,12 @@ __all__ = [
     "LmxSlidingWindowDataset",
     "LmxBatch",
     "LmxDataConfig",
-    "LengthBucketBatchSampler",
+    "LengthBucketedDynamicBatchSampler",
     "TrainingConfig",
     "TransformerDecoderLM",
-    "build_language_model_dataloader",
+    "build_dataloader",
     "build_lr_scheduler",
-    "collate_language_model_batch",
+    "collate_fn",
     "evaluate_decoder_language_model",
     "evaluate_decoder_language_model_metrics",
     "run_decoder_pretraining_loop",

@@ -13,6 +13,9 @@ from torch.utils.data import BatchSampler, DataLoader, Dataset
 
 PAD_TOKEN_ID = 0
 BUCKET_SIZE_MULTIPLIER = 50
+VALIDATION_MAX_LENGTH = 1024
+VALIDATION_SLIDING_WINDOW_STRIDE = 256
+VALIDATION_PAD_TO_LENGTH_MULTIPLE = 1
 
 
 @dataclass(slots=True)
@@ -57,13 +60,14 @@ class LmxSlidingWindowDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, Tensor]:
         raw_index, window_start, loss_start = self._resolve_sliding_window_index(index)
+        max_length = self._window_max_length()
 
         # get tokens from the dataset and apply the sliding window
         token_ids = self.dataset[raw_index]["input_ids"]
-        if len(token_ids) <= self.config.max_length:
+        if len(token_ids) <= max_length:
             tokens = token_ids
         else:
-            tokens = token_ids[window_start : window_start + self.config.max_length]
+            tokens = token_ids[window_start : window_start + max_length]
         if len(tokens) < 2:
             raise ValueError("Samples must contain at least 2 tokens.")
 
@@ -78,15 +82,25 @@ class LmxSlidingWindowDataset(Dataset):
     def sequence_length(self, index: int) -> int:
         raw_index, window_start, _ = self._resolve_sliding_window_index(index)
         length = len(self.dataset[raw_index]["input_ids"])
-        return min(length - window_start, self.config.max_length)
+        return min(length - window_start, self._window_max_length())
 
     def _resolve_sliding_window_index(self, index: int) -> tuple[int, int, int]:
         window = self._window_index[index]
         return window.raw_index, window.start, window.loss_start
 
+    def _window_max_length(self) -> int:
+        if self.config.split == "validation":
+            return VALIDATION_MAX_LENGTH
+        return self.config.max_length
+
+    def _window_stride(self) -> int:
+        if self.config.split == "validation":
+            return VALIDATION_SLIDING_WINDOW_STRIDE
+        return self.config.sliding_window_stride
+
     def _build_training_window_index(self) -> list[LmxSlidingWindow]:
-        stride = self.config.sliding_window_stride
-        max_length = self.config.max_length
+        stride = self._window_stride()
+        max_length = self._window_max_length()
         windows: list[LmxSlidingWindow] = []
         for raw_index in range(len(self.dataset)):
             token_ids = self.dataset[raw_index]["input_ids"]
@@ -101,8 +115,8 @@ class LmxSlidingWindowDataset(Dataset):
         return windows
 
     def _build_evaluation_window_index(self) -> list[LmxSlidingWindow]:
-        stride = self.config.sliding_window_stride
-        max_length = self.config.max_length
+        stride = self._window_stride()
+        max_length = self._window_max_length()
         step = min(stride, max_length - 1)
         windows: list[LmxSlidingWindow] = []
         for raw_index in range(len(self.dataset)):
@@ -129,7 +143,7 @@ class LmxSlidingWindowDataset(Dataset):
         return windows
 
 
-class LengthBucketBatchSampler(BatchSampler):
+class LengthBucketedDynamicBatchSampler(BatchSampler):
     def __init__(
         self,
         dataset: LmxSlidingWindowDataset,
@@ -154,6 +168,7 @@ class LengthBucketBatchSampler(BatchSampler):
         self.shuffle = shuffle
         self.max_tokens_per_batch = max_tokens_per_batch
         self.required_batch_size_multiple = dataset.config.required_batch_size_multiple
+        self.pad_to_length_multiple = dataset.config.pad_to_length_multiple
         self.bucket_padding_noise = dataset.config.bucket_padding_noise if shuffle else 0.0
         self._epoch = 0
         self._lengths = [dataset.sequence_length(index) for index in range(len(dataset))]
@@ -162,18 +177,9 @@ class LengthBucketBatchSampler(BatchSampler):
     def __iter__(self):
         generator = torch.Generator().manual_seed(self.seed + self._epoch)
         self._epoch += 1
-        if self.shuffle:
-            indices = torch.randperm(len(self.dataset), generator=generator).tolist()
-        else:
-            indices = list(range(len(self.dataset)))
-        batches = self._build_batches(indices)
-
-        if self.shuffle:
-            for batch_index in torch.randperm(len(batches), generator=generator).tolist():
-                yield batches[batch_index]
-            return
-
-        for batch in batches:
+        indices = self._sample_indices(generator)
+        batches = self._plan_batches(indices, generator=generator)
+        for batch in self._order_batches_for_epoch(batches, generator=generator):
             yield batch
 
     def __len__(self) -> int:
@@ -183,7 +189,28 @@ class LengthBucketBatchSampler(BatchSampler):
             self._cached_length = self._estimate_num_batches()
         return self._cached_length
 
-    def _build_batches(self, indices: list[int]) -> list[list[int]]:
+    def _sample_indices(self, generator: torch.Generator) -> list[int]:
+        if self.shuffle:
+            return torch.randperm(len(self.dataset), generator=generator).tolist()
+        return list(range(len(self.dataset)))
+
+    def _order_batches_for_epoch(
+        self,
+        batches: list[list[int]],
+        *,
+        generator: torch.Generator,
+    ) -> list[list[int]]:
+        if not self.shuffle:
+            return batches
+        order = torch.randperm(len(batches), generator=generator).tolist()
+        return [batches[index] for index in order]
+
+    def _plan_batches(
+        self,
+        indices: list[int],
+        *,
+        generator: torch.Generator | None = None,
+    ) -> list[list[int]]:
         if (
             not self.shuffle
             and self.max_tokens_per_batch is None
@@ -195,13 +222,10 @@ class LengthBucketBatchSampler(BatchSampler):
         if not self.dataset.config.length_bucketing:
             return self._build_batches_from_pool(indices)
 
-        bucket_size = self._bucket_size()
         batches: list[list[int]] = []
-        generator = torch.Generator().manual_seed(self.seed + self._epoch - 1)
-        for start in range(0, len(indices), bucket_size):
-            pool = indices[start : start + bucket_size]
-            self._sort_pool_by_length(pool, generator=generator)
-            batches.extend(self._build_batches_from_pool(pool))
+        for pool in self._iter_pools(indices):
+            ordered_pool = self._sorted_pool(pool, generator=generator)
+            batches.extend(self._build_batches_from_pool(ordered_pool))
         return batches
 
     def _uses_order_dependent_batching(self) -> bool:
@@ -213,8 +237,7 @@ class LengthBucketBatchSampler(BatchSampler):
 
     def _batches_for_next_epoch(self) -> list[list[int]]:
         generator = torch.Generator().manual_seed(self.seed + self._epoch)
-        indices = torch.randperm(len(self.dataset), generator=generator).tolist()
-        return self._build_batches(indices)
+        return self._plan_batches(self._sample_indices(generator), generator=generator)
 
     def _estimate_num_batches(self) -> int:
         if self.max_tokens_per_batch is None and self.required_batch_size_multiple == 1:
@@ -257,6 +280,11 @@ class LengthBucketBatchSampler(BatchSampler):
     def _bucket_size(self) -> int:
         return self.batch_size * BUCKET_SIZE_MULTIPLIER
 
+    def _iter_pools(self, indices: list[int]):
+        bucket_size = self._bucket_size()
+        for start in range(0, len(indices), bucket_size):
+            yield indices[start : start + bucket_size]
+
     def _build_fixed_size_batches(
         self,
         indices: list[int],
@@ -266,10 +294,7 @@ class LengthBucketBatchSampler(BatchSampler):
             for start in range(0, len(indices), self.batch_size)
         ]
 
-    def _build_batches_from_pool(
-        self,
-        pool: list[int],
-    ) -> list[list[int]]:
+    def _build_batches_from_pool(self, pool: list[int]) -> list[list[int]]:
         if self.max_tokens_per_batch is None and self.required_batch_size_multiple == 1:
             return self._build_fixed_size_batches(pool)
 
@@ -279,22 +304,25 @@ class LengthBucketBatchSampler(BatchSampler):
 
         for index in pool:
             sequence_length = self._lengths[index]
-            while current_batch:
-                prospective_max_length = max(current_max_length, sequence_length)
-                prospective_batch_size = len(current_batch) + 1
-                if not self._would_exceed_batch_constraints(
-                    prospective_max_length=prospective_max_length,
-                    prospective_batch_size=prospective_batch_size,
-                ):
-                    break
+            if not current_batch and self._would_exceed_batch_constraints(
+                prospective_max_length=sequence_length,
+                prospective_batch_size=1,
+            ):
+                raise ValueError(
+                    "A single sequence exceeds max_tokens_per_batch after padding. "
+                    "Increase max_tokens_per_batch or reduce max_length."
+                )
+            while current_batch and self._would_exceed_batch_constraints(
+                prospective_max_length=max(current_max_length, sequence_length),
+                prospective_batch_size=len(current_batch) + 1,
+            ):
                 emitted_batch, current_batch = self._split_batch_on_multiple(current_batch)
                 if emitted_batch:
                     batches.append(emitted_batch)
-                    current_max_length = self._max_batch_length(current_batch)
-                    continue
-                batches.append(current_batch)
-                current_batch = []
-                current_max_length = 0
+                else:
+                    batches.append(current_batch)
+                    current_batch = []
+                current_max_length = self._max_batch_length(current_batch)
             current_batch.append(index)
             current_max_length = max(current_max_length, sequence_length)
 
@@ -302,17 +330,25 @@ class LengthBucketBatchSampler(BatchSampler):
             batches.extend(self._finalize_tail_batch(current_batch))
         return batches
 
-    def _sort_pool_by_length(self, pool: list[int], *, generator: torch.Generator) -> None:
+    def _sorted_pool(
+        self,
+        pool: list[int],
+        *,
+        generator: torch.Generator | None,
+    ) -> list[int]:
+        ordered_pool = list(pool)
         if self.bucket_padding_noise == 0.0:
-            pool.sort(key=self._lengths.__getitem__, reverse=True)
-            return
+            ordered_pool.sort(key=self._lengths.__getitem__, reverse=True)
+            return ordered_pool
 
         noisy_lengths = {}
-        for index in pool:
+        assert generator is not None
+        for index in ordered_pool:
             length = float(self._lengths[index])
             noise_scale = 1.0 + ((torch.rand(1, generator=generator).item() * 2.0) - 1.0) * self.bucket_padding_noise
             noisy_lengths[index] = max(length * noise_scale, 0.0)
-        pool.sort(key=noisy_lengths.__getitem__, reverse=True)
+        ordered_pool.sort(key=noisy_lengths.__getitem__, reverse=True)
+        return ordered_pool
 
     def _would_exceed_batch_constraints(
         self,
@@ -323,7 +359,11 @@ class LengthBucketBatchSampler(BatchSampler):
         if prospective_batch_size > self.batch_size:
             return True
         if self.max_tokens_per_batch is not None:
-            return prospective_max_length * prospective_batch_size > self.max_tokens_per_batch
+            effective_length = _effective_padded_length(
+                prospective_max_length,
+                self.pad_to_length_multiple,
+            )
+            return effective_length * prospective_batch_size > self.max_tokens_per_batch
         return False
 
     def _aligned_prefix_size(self, batch_size: int) -> int:
@@ -371,7 +411,7 @@ class LmxBatch:
             loss_mask=None if self.loss_mask is None else self.loss_mask.to(device),
         )
 
-def collate_language_model_batch(
+def collate_fn(
     examples: list[dict[str, Tensor]],
     *,
     pad_to_length_multiple: int = 1,
@@ -386,12 +426,11 @@ def collate_language_model_batch(
         batch_first=True,
         padding_value=False,
     )
-    if pad_to_length_multiple > 1:
-        padded_length = _round_up_to_multiple(tokens.size(1), pad_to_length_multiple)
-        if padded_length > tokens.size(1):
-            tokens = F.pad(tokens, (0, padded_length - tokens.size(1)), value=PAD_TOKEN_ID)
-        if padded_length - 1 > loss_mask.size(1):
-            loss_mask = F.pad(loss_mask, (0, padded_length - 1 - loss_mask.size(1)), value=False)
+    padded_length = _effective_padded_length(tokens.size(1), pad_to_length_multiple)
+    if padded_length > tokens.size(1):
+        tokens = F.pad(tokens, (0, padded_length - tokens.size(1)), value=PAD_TOKEN_ID)
+    if padded_length - 1 > loss_mask.size(1):
+        loss_mask = F.pad(loss_mask, (0, padded_length - 1 - loss_mask.size(1)), value=False)
     return LmxBatch(
         input_tokens=tokens[:, :-1],
         output_tokens=tokens[:, 1:],
@@ -400,44 +439,72 @@ def collate_language_model_batch(
     )
 
 
-def build_language_model_dataloader(
+def build_dataloader(
     config: LmxDataConfig,
     batch_size: int,
     seed: int,
-    shuffle: bool | None = None,
 ) -> DataLoader[LmxBatch]:
     dataset = LmxSlidingWindowDataset(config)
-    if shuffle is None:
-        shuffle = config.split == "training"
+    if config.split == "training":
+        return _build_train_dataloader(dataset, batch_size=batch_size, seed=seed)
+    return _build_eval_dataloader(dataset, batch_size=batch_size)
 
-    dataloader_kwargs = {
-        "dataset": dataset,
-        "num_workers": config.num_workers,
-        "collate_fn": partial(
-            collate_language_model_batch,
-            pad_to_length_multiple=config.pad_to_length_multiple,
-        ),
-    }
+
+def _build_train_dataloader(
+    dataset: LmxSlidingWindowDataset,
+    *,
+    batch_size: int,
+    seed: int,
+) -> DataLoader[LmxBatch]:
+    collate = partial(
+        collate_fn,
+        pad_to_length_multiple=dataset.config.pad_to_length_multiple,
+    )
     if (
-        config.length_bucketing
-        or config.max_tokens_per_batch is not None
-        or config.required_batch_size_multiple > 1
+        dataset.config.length_bucketing
+        or dataset.config.max_tokens_per_batch is not None
+        or dataset.config.required_batch_size_multiple > 1
     ):
-        dataloader_kwargs["batch_sampler"] = LengthBucketBatchSampler(
+        return DataLoader(
             dataset=dataset,
-            batch_size=batch_size,
-            seed=seed,
-            shuffle=shuffle,
-            max_tokens_per_batch=config.max_tokens_per_batch,
+            batch_sampler=LengthBucketedDynamicBatchSampler(
+                dataset=dataset,
+                batch_size=batch_size,
+                seed=seed,
+                shuffle=True,
+                max_tokens_per_batch=dataset.config.max_tokens_per_batch,
+            ),
+            num_workers=dataset.config.num_workers,
+            collate_fn=collate,
         )
-    else:
-        generator = None
-        if config.split == "training":
-            generator = torch.Generator().manual_seed(seed)
-        dataloader_kwargs["batch_size"] = batch_size
-        dataloader_kwargs["shuffle"] = shuffle
-        dataloader_kwargs["generator"] = generator
-    return DataLoader(**dataloader_kwargs)
+
+    generator = torch.Generator().manual_seed(seed)
+    return DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        generator=generator,
+        num_workers=dataset.config.num_workers,
+        collate_fn=collate,
+    )
+
+
+def _build_eval_dataloader(
+    dataset: LmxSlidingWindowDataset,
+    *,
+    batch_size: int,
+) -> DataLoader[LmxBatch]:
+    return DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=dataset.config.num_workers,
+        collate_fn=partial(collate_fn, pad_to_length_multiple=VALIDATION_PAD_TO_LENGTH_MULTIPLE),
+    )
+
+
+def _effective_padded_length(length: int, pad_to_length_multiple: int) -> int:
+    return _round_up_to_multiple(length, pad_to_length_multiple)
 
 
 def _round_up_to_multiple(length: int, multiple: int) -> int:

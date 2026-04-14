@@ -21,11 +21,17 @@ Supported configuration fields:
 
 | Field | Purpose |
 | --- | --- |
-| `length_bucketing` | Sort examples by approximate length inside large pools before batching |
+| `length_bucketing` | Enable length grouping on the training split |
 | `bucket_padding_noise` | Add small random noise to bucket sorting to avoid rigid length ordering |
-| `max_tokens_per_batch` | Build batches under a token budget instead of a fixed sample count |
+| `max_tokens_per_batch` | Build training batches under a token budget instead of a fixed sample count |
 | `required_batch_size_multiple` | Try to emit dynamic batches whose sample count matches a fixed multiple |
-| `pad_to_length_multiple` | Pad batch length to a fixed multiple during collation to reduce shape diversity |
+| `pad_to_length_multiple` | Pad training batch length to a fixed multiple during collation to reduce shape diversity |
+
+Public API:
+
+- `build_dataloader()`
+- `collate_fn()`
+- `LengthBucketedDynamicBatchSampler`
 
 ## Batching Pipeline
 
@@ -40,7 +46,7 @@ The sampler batches windows, not raw full-length sequences.
 
 ### 2. Length Bucketing
 
-When `length_bucketing` is enabled:
+When `length_bucketing` is enabled on the training split:
 
 1. Training examples are shuffled.
 2. Indices are split into large pools.
@@ -51,13 +57,13 @@ This keeps similarly sized samples together while avoiding a completely determin
 
 ### 3. Max Tokens Per Batch
 
-When `max_tokens_per_batch` is enabled, batches are built dynamically instead of being split directly by a fixed sample count.
+When `max_tokens_per_batch` is enabled, training batches are built dynamically instead of being split directly by a fixed sample count.
 
 The current budget rule is:
 
-`max(sequence_length in batch) * batch_size <= max_tokens_per_batch`
+`round_up(max(sequence_length in batch), pad_to_length_multiple) * batch_size <= max_tokens_per_batch`
 
-This uses the padded batch length as a proxy for total token cost.
+This uses the effective padded batch length so the sampler budget matches the real collated shape.
 
 In this setup:
 
@@ -76,9 +82,7 @@ This is a common engineering optimization for more regular kernel behavior.
 
 ### 5. Pad To Length Multiple
 
-Instead of implementing explicit batch-shape tables, the current pipeline uses:
-
-- `pad_to_length_multiple`
+Instead of implementing explicit batch-shape tables, the current pipeline uses `pad_to_length_multiple`.
 
 During collation, batch length is rounded up to a fixed multiple such as:
 
@@ -125,6 +129,14 @@ Preferred properties:
 - fixed ordering
 - stable loss accounting
 - stable batch shape behavior
+- no dependence on training-side length bucketing or token-budget batching
+
+Current rule:
+
+- `build_dataloader()` uses separate internal train/eval paths
+- training may use `LengthBucketedDynamicBatchSampler`
+- validation always uses fixed batching, `shuffle = false`, and `pad_to_length_multiple = 1`
+- cross-run comparison should also keep `eval_batch_size` fixed
 
 ### Moving to a Smaller GPU
 
@@ -136,10 +148,13 @@ If the target GPU has less memory, batch size will not shrink automatically. The
 
 ## Experiment Results
 
-The table below summarizes the latest `600s` reruns after:
+The table below summarizes the latest `600s` reruns under the canonical validation recipe:
 
-- removing the temporary `RoPE` path
-- tightening wall-clock budget checks
+- fixed-batch validation
+- `shuffle = false`
+- no validation length bucketing
+- no validation token budget
+- `eval_batch_size = 16`
 
 Because some faster runs can still finish a validation pass after the `600s` boundary, the fairest comparison is the first shared validation point at `step=500`.
 
@@ -147,12 +162,12 @@ Because some faster runs can still finish a validation pass after the `600s` bou
 
 | exp | step500 val loss | toks/sec | step time | peak mem | description |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 1 | 4.8384 | 26362.6 | 0.4204s | 35769.2 MiB | baseline |
-| 2 | 4.8389 | 28188.5 | 0.3929s | 41051.4 MiB | baseline + `BF16` |
-| 3 | 4.6188 | 31991.4 | 0.4889s | 117543.9 MiB | `length bucketing + max_tokens_per_batch=16384` |
-| 4 | 4.6186 | 32903.6 | 0.4679s | 107644.5 MiB | exp3 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
-| 5 | 4.6181 | 38484.7 | 0.4005s | 114694.6 MiB | exp4 + `BF16` |
-| 6 | 4.6071 | 41843.8 | 0.3635s | 99514.6 MiB | exp5 + `required_batch_size_multiple=4` |
+| 1 | 4.8384 | 24212.0 | 0.4594s | 35943.4 MiB | baseline |
+| 2 | 4.6188 | 31680.9 | 0.4927s | 107698.9 MiB | `length_bucketing + max_tokens_per_batch=16384` |
+| 3 | 4.6159 | 29999.6 | 0.5173s | 119031.0 MiB | exp2 + `bucket_padding_noise=0.1` |
+| 4 | 4.5809 | 35236.3 | 0.4376s | 73221.6 MiB | exp2 + `pad_to_length_multiple=64` |
+| 5 | 4.6592 | 39823.9 | 0.3814s | 89175.1 MiB | exp2 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
+| 6 | 4.6553 | 29824.0 | 0.5012s | 72226.5 MiB | exp5 + `required_batch_size_multiple=4` |
 
 ### Run-Level Best Metrics
 
@@ -160,57 +175,26 @@ These values are still useful for operational monitoring, but they should not be
 
 | exp | best val loss | elapsed | final step | description |
 | --- | ---: | ---: | ---: | --- |
-| 1 | 4.8384 | 600.0s | 951 | baseline |
-| 2 | 3.4196 | 660.8s | 1000 | baseline + `BF16` |
-| 3 | 4.6188 | 600.4s | 809 | `length bucketing + max_tokens_per_batch=16384` |
-| 4 | 4.6186 | 601.4s | 908 | exp3 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
-| 5 | 3.1282 | 644.6s | 1000 | exp4 + `BF16` |
-| 6 | 3.0577 | 600.3s | 1052 | exp5 + `required_batch_size_multiple=4` |
+| 1 | 4.8384 | 600.09s | 823 | baseline |
+| 2 | 4.6188 | 600.43s | 724 | `length_bucketing + max_tokens_per_batch=16384` |
+| 3 | 4.6159 | 600.33s | 647 | exp2 + `bucket_padding_noise=0.1` |
+| 4 | 4.5809 | 600.13s | 848 | exp2 + `pad_to_length_multiple=64` |
+| 5 | 3.1303 | 726.55s | 1000 | exp2 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
+| 6 | 4.6553 | 600.17s | 779 | exp5 + `required_batch_size_multiple=4` |
 
 ### Takeaways
 
-- `length bucketing + max_tokens_per_batch` is clearly better than the plain baseline on both validation loss and throughput.
-- `bucket_padding_noise=0.1` gives a small but consistent gain over rigid length sorting.
-- `pad_to_length_multiple=64` improves throughput without hurting validation loss.
-- `BF16` is mainly a throughput optimization in these comparisons. At matched validation steps, it does not change loss much by itself.
-- `required_batch_size_multiple=4` is the strongest variant so far. In this rerun it improves throughput, lowers peak memory relative to exp5, and gives the best shared `step=500` validation loss.
+- Under the canonical fixed validation recipe, `length bucketing + max_tokens_per_batch` is still clearly better than the plain baseline on both validation loss and throughput.
+- `bucket_padding_noise=0.1` gives only a weak loss gain and slightly hurts throughput.
+- `pad_to_length_multiple=64` is the strongest single follow-up change on top of `length_bucketing + max_tokens_per_batch=16384`.
+- combining `bucket_padding_noise=0.1` and `pad_to_length_multiple=64` is worse than using `pad_to_length_multiple=64` alone
+- `required_batch_size_multiple=4` does not help under the current token-budget regime.
 
 Current best direction for further batching experiments:
 
 - `length_bucketing = true`
-- `bucket_padding_noise = 0.1`
 - `max_tokens_per_batch = 16384`
 - `pad_to_length_multiple = 64`
-- `required_batch_size_multiple = 4`
-
-### 7200s Follow-Up
-
-The strongest `600s` variant was also rerun for a full `7200s` budget.
-
-Configuration:
-
-- `length_bucketing = true`
-- `bucket_padding_noise = 0.1`
-- `max_tokens_per_batch = 16384`
-- `required_batch_size_multiple = 4`
-- `pad_to_length_multiple = 64`
-- `batch_size = 64`
-- `precision = bf16`
-
-Result:
-
-| best val loss | best step | final step | elapsed | toks/sec | step time | peak mem |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1.6485 | 9000 | 10279 | 7200.15s | 35488.1 | 0.4287s | 125480.8 MiB |
-
-Compared with the fixed-batch `7200s` baseline:
-
-- baseline best val loss: `1.6735`
-- baseline average tokens per second: `20383.4`
-- length-bucketing variant average tokens per second: `35488.1`
-- throughput improvement: about `74%`
-
-This run is therefore a meaningful improvement in both validation loss and training throughput, and it supports keeping the batching path active for future work.
 
 ## References
 
