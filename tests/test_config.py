@@ -58,10 +58,9 @@ def test_training_config_requires_eval_for_target_validation_loss() -> None:
     with pytest.raises(ValueError, match="eval_every > 0"):
         TrainingConfig(target_validation_loss=1.0, eval_every=0)
 
-
-def test_training_config_rejects_unknown_precision() -> None:
-    with pytest.raises(ValueError, match="precision"):
-        TrainingConfig(precision="fp16")
+def test_training_config_rejects_non_positive_eval_batch_size() -> None:
+    with pytest.raises(ValueError, match="eval_batch_size"):
+        TrainingConfig(eval_batch_size=0)
 
 
 def test_decoder_language_model_config_rejects_unknown_activation() -> None:

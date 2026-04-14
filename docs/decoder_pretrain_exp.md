@@ -1,6 +1,6 @@
 # Decoder Pretraining Experiments
 
-Last updated: 2026-04-12
+Last updated: 2026-04-13
 
 ## Usage
 
@@ -65,40 +65,35 @@ Last updated: 2026-04-12
 - device: `mps`
 - average tokens per second: `20383.4`
 
-## Latest 7200s Length-Bucketing Result
+## Apr 13 600s Fixed-Eval Rerun
 
 ### Status
 
-- This is the strongest `7200s` result so far.
-- It is better than the current accepted fixed-batch baseline, but it is recorded here as a new result rather than silently replacing the baseline section above.
+- These reruns restore a fixed validation recipe so batching experiments can be compared to the accepted baseline family again.
 
-### Recipe
+### Validation Protocol
 
-- start from the `7200s` baseline recipe above
-- `length_bucketing = true`
-- `bucket_padding_noise = 0.1`
-- `max_tokens_per_batch = 16384`
-- `required_batch_size_multiple = 4`
-- `pad_to_length_multiple = 64`
-- `batch_size = 64` as an upper bound on example count
-- `precision = bf16`
+- fixed-batch validation
+- `shuffle = false`
+- no validation length bucketing
+- no validation token budget
+- `eval_batch_size = 16`
 
-### Run
+### Shared `step=500` Comparison
 
-- run dir: [`../artifacts/runs/2026-04-12_15-43-20_035673`](../artifacts/runs/2026-04-12_15-43-20_035673)
-- summary: [`../artifacts/runs/2026-04-12_15-43-20_035673/summary.json`](../artifacts/runs/2026-04-12_15-43-20_035673/summary.json)
-- config snapshot: [`../artifacts/runs/2026-04-12_15-43-20_035673/config.yaml`](../artifacts/runs/2026-04-12_15-43-20_035673/config.yaml)
+| exp | step500 val loss | toks/sec | step time | peak mem | description |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 1 | 4.8384 | 24212.0 | 0.4594s | 35943.4 MiB | baseline |
+| 2 | 4.6188 | 31680.9 | 0.4927s | 107698.9 MiB | `length_bucketing + max_tokens_per_batch=16384` |
+| 3 | 4.6159 | 29999.6 | 0.5173s | 119031.0 MiB | exp2 + `bucket_padding_noise=0.1` |
+| 4 | 4.5809 | 35236.3 | 0.4376s | 73221.6 MiB | exp2 + `pad_to_length_multiple=64` |
+| 5 | 4.6592 | 39823.9 | 0.3814s | 89175.1 MiB | exp2 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
 
-### Metrics
+### Takeaway
 
-- best validation loss: `1.6485`
-- best validation step: `9000`
-- final step: `10279`
-- elapsed seconds: `7200.15`
-- device: `mps`
-- average step time: `0.4287s`
-- average tokens per second: `35488.1`
-- MPS peak memory: `125480.8 MiB`
+- Under the restored fixed validation recipe, `length_bucketing + max_tokens_per_batch=16384` is a clear improvement over the fixed-batch baseline.
+- `pad_to_length_multiple=64` is the strongest single follow-up change on top of that challenger.
+- `bucket_padding_noise=0.1` is only a weak positive signal.
 
 ## Apr 9 7200s Autoresearch Summary
 

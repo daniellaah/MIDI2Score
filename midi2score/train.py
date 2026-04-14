@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import time
-from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
@@ -13,7 +12,12 @@ from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
-from midi2score.data import LmxDataConfig, build_language_model_dataloader
+from midi2score.data import (
+    LmxDataConfig,
+    VALIDATION_MAX_LENGTH,
+    build_eval_dataloader,
+    build_train_dataloader,
+)
 from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 
 
@@ -21,6 +25,7 @@ from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 class TrainingConfig:
     seed: int = 0
     batch_size: int = 8
+    eval_batch_size: int | None = None
     learning_rate: float = 1e-3
     beta1: float = 0.9
     beta2: float = 0.999
@@ -36,7 +41,6 @@ class TrainingConfig:
     eval_every: int = 0
     num_eval_batches: int | None = None
     target_validation_loss: float | None = None
-    precision: str = "fp32"
     device: str = "auto"
     save_checkpoint_path: str | None = None
     save_best_checkpoint_path: str | None = None
@@ -49,6 +53,8 @@ class TrainingConfig:
             raise ValueError("seed must be non-negative.")
         if self.batch_size <= 0:
             raise ValueError("batch_size must be positive.")
+        if self.eval_batch_size is not None and self.eval_batch_size <= 0:
+            raise ValueError("eval_batch_size must be positive when provided.")
         if self.learning_rate <= 0.0:
             raise ValueError("learning_rate must be positive.")
         if not 0.0 < self.beta1 < 1.0:
@@ -77,8 +83,6 @@ class TrainingConfig:
             raise ValueError("target_validation_loss must be non-negative.")
         if self.target_validation_loss is not None and self.eval_every == 0:
             raise ValueError("target_validation_loss requires eval_every > 0.")
-        if self.precision not in {"fp32", "bf16"}:
-            raise ValueError("precision must be fp32 or bf16.")
         if self.resume_checkpoint_path is not None and not Path(self.resume_checkpoint_path).exists():
             raise ValueError(f"resume_checkpoint_path does not exist: {self.resume_checkpoint_path}")
 
@@ -189,15 +193,6 @@ def _supports_mps_memory_tracking(device: torch.device | str) -> bool:
     return hasattr(torch.mps, "driver_allocated_memory")
 
 
-def build_autocast_context(device: torch.device | str, precision: str):
-    device_type = str(device)
-    if precision == "fp32":
-        return nullcontext()
-    if precision == "bf16":
-        return torch.autocast(device_type=device_type, dtype=torch.bfloat16)
-    raise ValueError(f"Unsupported precision {precision!r}.")
-
-
 def save_checkpoint(path: str, payload: dict) -> None:
     checkpoint_path = Path(path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -255,7 +250,6 @@ def evaluate_decoder_language_model(
     device: torch.device | str,
     num_batches: int | None = None,
     mps_memory_tracker: MpsMemoryTracker | None = None,
-    precision: str = "fp32",
 ) -> float:
     return evaluate_decoder_language_model_metrics(
         model,
@@ -264,7 +258,6 @@ def evaluate_decoder_language_model(
         device=device,
         num_batches=num_batches,
         mps_memory_tracker=mps_memory_tracker,
-        precision=precision,
     ).loss
 
 
@@ -276,7 +269,6 @@ def evaluate_decoder_language_model_metrics(
     device: torch.device | str,
     num_batches: int | None = None,
     mps_memory_tracker: MpsMemoryTracker | None = None,
-    precision: str = "fp32",
 ) -> DecoderEvaluationMetrics:
     model.eval()
     total_loss = 0.0
@@ -289,8 +281,7 @@ def evaluate_decoder_language_model_metrics(
             batch = batch.to(device)
             if mps_memory_tracker is not None:
                 mps_memory_tracker.record()
-            with build_autocast_context(device, precision):
-                logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+            logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
             if mps_memory_tracker is not None:
                 mps_memory_tracker.record()
             flat_targets = batch.output_tokens.reshape(-1)
@@ -333,20 +324,22 @@ def run_decoder_pretraining_loop(
     training_config: TrainingConfig,
 ) -> DecoderPretrainingResult:
     _validate_setup(model_config, data_config)
+    if training_config.eval_every > 0 and model_config.max_length < VALIDATION_MAX_LENGTH:
+        raise ValueError(
+            f"model.max_length must be >= {VALIDATION_MAX_LENGTH} when validation is enabled."
+        )
     torch.manual_seed(training_config.seed)
     device = resolve_device(training_config.device)
-    train_loader = build_language_model_dataloader(
+    train_loader = build_train_dataloader(
         data_config,
         batch_size=training_config.batch_size,
         seed=training_config.seed,
     )
     validation_loader = None
     if training_config.eval_every > 0:
-        validation_loader = build_language_model_dataloader(
+        validation_loader = build_eval_dataloader(
             replace(data_config, split="validation"),
-            batch_size=training_config.batch_size,
-            seed=training_config.seed,
-            shuffle=False,
+            batch_size=training_config.eval_batch_size or training_config.batch_size,
         )
 
     model = TransformerDecoderLM(model_config).to(device)
@@ -412,8 +405,7 @@ def run_decoder_pretraining_loop(
             batch = batch.to(device)
             mps_memory_tracker.record()
             step_started_at = time.monotonic()
-            with build_autocast_context(device, training_config.precision):
-                logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+            logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
             mps_memory_tracker.record()
             loss = F.cross_entropy(
                 logits.reshape(-1, logits.size(-1)).float(),
@@ -465,7 +457,6 @@ def run_decoder_pretraining_loop(
                     device=device,
                     num_batches=training_config.num_eval_batches,
                     mps_memory_tracker=mps_memory_tracker,
-                    precision=training_config.precision,
                 )
                 validation_losses.append((step, metrics.loss))
                 logger.log_scalar(step=step, split="validation", value=metrics.loss)
