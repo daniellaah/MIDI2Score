@@ -88,14 +88,12 @@ Last updated: 2026-04-13
 | 3 | 4.6159 | 29999.6 | 0.5173s | 119031.0 MiB | exp2 + `bucket_padding_noise=0.1` |
 | 4 | 4.5809 | 35236.3 | 0.4376s | 73221.6 MiB | exp2 + `pad_to_length_multiple=64` |
 | 5 | 4.6592 | 39823.9 | 0.3814s | 89175.1 MiB | exp2 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
-| 6 | 4.6553 | 29824.0 | 0.5012s | 72226.5 MiB | exp5 + `required_batch_size_multiple=4` |
 
 ### Takeaway
 
 - Under the restored fixed validation recipe, `length_bucketing + max_tokens_per_batch=16384` is a clear improvement over the fixed-batch baseline.
 - `pad_to_length_multiple=64` is the strongest single follow-up change on top of that challenger.
 - `bucket_padding_noise=0.1` is only a weak positive signal.
-- `required_batch_size_multiple=4` does not help in the current setup.
 
 ## Apr 9 7200s Autoresearch Summary
 

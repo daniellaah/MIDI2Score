@@ -5,13 +5,14 @@ import pytest
 import torch
 
 from midi2score.data import (
-    LmxSlidingWindowDataset,
     LmxBatch,
     LmxDataConfig,
-    LengthBucketedDynamicBatchSampler,
+    LmxEvalDataset,
+    LmxTrainDataset,
+    LengthBucketBatchSampler,
     VALIDATION_MAX_LENGTH,
-    VALIDATION_SLIDING_WINDOW_STRIDE,
-    build_dataloader,
+    build_eval_dataloader,
+    build_train_dataloader,
     collate_fn,
 )
 from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
@@ -51,9 +52,7 @@ class DummyBatchingDataset(DummySlidingWindowDataset):
 def build_dummy_sampler_dataset(
     lengths: list[int],
     *,
-    length_bucketing: bool = False,
     max_tokens_per_batch: int | None = None,
-    required_batch_size_multiple: int = 1,
     bucket_padding_noise: float = 0.0,
     pad_to_length_multiple: int = 1,
 ) -> DummySlidingWindowDataset:
@@ -64,10 +63,8 @@ def build_dummy_sampler_dataset(
             split="training",
             max_length=64,
             sliding_window_stride=32,
-            length_bucketing=length_bucketing,
             bucket_padding_noise=bucket_padding_noise,
             max_tokens_per_batch=max_tokens_per_batch,
-            required_batch_size_multiple=required_batch_size_multiple,
             pad_to_length_multiple=pad_to_length_multiple,
         ),
     )
@@ -77,9 +74,7 @@ def build_dummy_batching_dataset(
     lengths: list[int],
     *,
     max_tokens_per_batch: int | None = None,
-    required_batch_size_multiple: int = 1,
     pad_to_length_multiple: int = 1,
-    length_bucketing: bool = False,
     bucket_padding_noise: float = 0.0,
 ) -> DummyBatchingDataset:
     return DummyBatchingDataset(
@@ -89,10 +84,8 @@ def build_dummy_batching_dataset(
             split="training",
             max_length=max(lengths),
             sliding_window_stride=max(1, max(lengths) // 2),
-            length_bucketing=length_bucketing,
             bucket_padding_noise=bucket_padding_noise,
             max_tokens_per_batch=max_tokens_per_batch,
-            required_batch_size_multiple=required_batch_size_multiple,
             pad_to_length_multiple=pad_to_length_multiple,
         ),
     )
@@ -107,25 +100,6 @@ def build_dummy_batch(*, batch_size: int = 2, sequence_length: int = 8) -> LmxBa
         padding_mask=torch.zeros((batch_size, sequence_length), dtype=torch.bool),
         loss_mask=torch.ones((batch_size, sequence_length), dtype=torch.bool),
     )
-
-
-def build_small_real_batch() -> tuple[DecoderLanguageModelConfig, object]:
-    model_config = DecoderLanguageModelConfig(
-        vocab_size=5000,
-        d_model=32,
-        nhead=4,
-        num_layers=2,
-        dim_feedforward=64,
-        max_length=VALIDATION_MAX_LENGTH,
-    )
-    data_config = LmxDataConfig(
-        dataset_path="data/huggingface",
-        split="training",
-        max_length=64,
-        sliding_window_stride=32,
-    )
-    batch = next(iter(build_dataloader(data_config, batch_size=4, seed=0)))
-    return model_config, batch
 
 
 def build_small_synthetic_batch() -> tuple[DecoderLanguageModelConfig, LmxBatch]:
@@ -147,7 +121,7 @@ def test_language_model_dataloader_reads_real_dataset() -> None:
         max_length=64,
         sliding_window_stride=32,
     )
-    batch = next(iter(build_dataloader(data_config, batch_size=2, seed=0)))
+    batch = next(iter(build_train_dataloader(data_config, batch_size=2, seed=0)))
 
     assert batch.input_tokens.shape[0] == 2
     assert batch.input_tokens.shape == batch.output_tokens.shape
@@ -162,7 +136,7 @@ def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
         max_length=32,
         sliding_window_stride=16,
     )
-    dataset = LmxSlidingWindowDataset(config)
+    dataset = LmxTrainDataset(config)
     long_index = next(
         index
         for index in range(len(dataset.dataset))
@@ -171,7 +145,7 @@ def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
     raw_tokens = dataset.dataset[long_index]["input_ids"]
     starts = [
         spec.start
-        for spec in dataset._window_index or []
+        for spec in dataset.windows
         if spec.raw_index == long_index
     ]
 
@@ -181,7 +155,7 @@ def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
 
     last_window_dataset_index = next(
         i
-        for i, spec in enumerate(dataset._window_index or [])
+        for i, spec in enumerate(dataset.windows)
         if spec.raw_index == long_index and spec.start == starts[-1]
     )
     example = dataset[last_window_dataset_index]
@@ -196,7 +170,7 @@ def test_validation_sliding_window_scores_each_target_token_once() -> None:
         max_length=32,
         sliding_window_stride=16,
     )
-    dataset = LmxSlidingWindowDataset(config)
+    dataset = LmxEvalDataset(config)
     long_index = next(
         index
         for index in range(len(dataset.dataset))
@@ -205,10 +179,10 @@ def test_validation_sliding_window_scores_each_target_token_once() -> None:
     raw_tokens = dataset.dataset[long_index]["input_ids"]
     covered_targets: list[int] = []
 
-    for spec in dataset._window_index or []:
+    for spec in dataset.windows:
         if spec.raw_index != long_index:
             continue
-        window = dataset[next(i for i, candidate in enumerate(dataset._window_index or []) if candidate == spec)]
+        window = dataset[next(i for i, candidate in enumerate(dataset.windows) if candidate == spec)]
         scored_positions = window["loss_mask"].nonzero(as_tuple=False).flatten().tolist()
         covered_targets.extend(spec.start + 1 + position for position in scored_positions)
 
@@ -229,27 +203,25 @@ def test_validation_dataset_ignores_passed_window_arguments() -> None:
         sliding_window_stride=1024,
     )
 
-    narrow_dataset = LmxSlidingWindowDataset(narrow_config)
-    wide_dataset = LmxSlidingWindowDataset(wide_config)
+    narrow_dataset = LmxEvalDataset(narrow_config)
+    wide_dataset = LmxEvalDataset(wide_config)
 
     assert len(narrow_dataset) == len(wide_dataset)
     assert [
         (window.raw_index, window.start, window.loss_start)
-        for window in narrow_dataset._window_index[:100]
+        for window in narrow_dataset.windows[:100]
     ] == [
         (window.raw_index, window.start, window.loss_start)
-        for window in wide_dataset._window_index[:100]
+        for window in wide_dataset.windows[:100]
     ]
-    assert narrow_dataset._window_max_length() == VALIDATION_MAX_LENGTH
-    assert narrow_dataset._window_stride() == VALIDATION_SLIDING_WINDOW_STRIDE
+    assert max(window.length for window in narrow_dataset.windows[:100]) <= VALIDATION_MAX_LENGTH
 
 
 def test_length_bucketed_dynamic_batch_sampler_groups_examples_by_length() -> None:
     dataset = build_dummy_sampler_dataset(
         [48, 12, 36, 64, 24, 8, 56, 16],
-        length_bucketing=True,
     )
-    sampler = LengthBucketedDynamicBatchSampler(
+    sampler = LengthBucketBatchSampler(
         dataset=dataset,
         batch_size=4,
         seed=23,
@@ -265,10 +237,9 @@ def test_length_bucketed_dynamic_batch_sampler_groups_examples_by_length() -> No
 def test_length_bucketed_dynamic_batch_sampler_respects_max_tokens_per_batch() -> None:
     dataset = build_dummy_sampler_dataset(
         [64, 56, 48, 40, 32, 24, 16, 8],
-        length_bucketing=True,
         max_tokens_per_batch=128,
     )
-    sampler = LengthBucketedDynamicBatchSampler(
+    sampler = LengthBucketBatchSampler(
         dataset=dataset,
         batch_size=8,
         seed=23,
@@ -282,31 +253,6 @@ def test_length_bucketed_dynamic_batch_sampler_respects_max_tokens_per_batch() -
         assert padded_length * len(batch_indices) <= 128
 
 
-def test_length_bucketed_dynamic_batch_sampler_respects_required_batch_size_multiple() -> None:
-    dataset = build_dummy_sampler_dataset(
-        [240, 224, 208, 192, 160, 144, 128, 112, 96, 80],
-        max_tokens_per_batch=1024,
-        required_batch_size_multiple=4,
-    )
-    sampler = LengthBucketedDynamicBatchSampler(
-        dataset=dataset,
-        batch_size=8,
-        seed=23,
-        shuffle=False,
-        max_tokens_per_batch=dataset.config.max_tokens_per_batch,
-    )
-
-    batch_sizes = []
-    for batch_index, batch_indices in enumerate(sampler):
-        batch_sizes.append(len(batch_indices))
-        if batch_index >= 49:
-            break
-
-    assert any(batch_size % 4 == 0 for batch_size in batch_sizes)
-    assert batch_sizes[:-1] == [4, 4]
-    assert batch_sizes[-1] <= 4
-
-
 def test_build_dataloader_supports_dynamic_batch_size_with_token_budget() -> None:
     dataset = build_dummy_batching_dataset(
         [64, 60, 52, 48, 40, 36, 32, 28, 24, 20, 16],
@@ -314,10 +260,10 @@ def test_build_dataloader_supports_dynamic_batch_size_with_token_budget() -> Non
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.data.LmxSlidingWindowDataset", lambda config: dataset)
-        loader = build_dataloader(dataset.config, batch_size=8, seed=0)
+        monkeypatch.setattr("midi2score.data.LmxTrainDataset", lambda config: dataset)
+        loader = build_train_dataloader(dataset.config, batch_size=8, seed=0)
 
-        assert isinstance(loader.batch_sampler, LengthBucketedDynamicBatchSampler)
+        assert isinstance(loader.batch_sampler, LengthBucketBatchSampler)
         batch_sizes: list[int] = []
         for batch in loader:
             batch_sizes.append(batch.input_tokens.size(0))
@@ -334,14 +280,12 @@ def test_build_dataloader_keeps_validation_fixed_even_if_dynamic_fields_are_set(
         split="validation",
         max_length=256,
         sliding_window_stride=128,
-        length_bucketing=True,
         bucket_padding_noise=0.1,
         max_tokens_per_batch=512,
-        required_batch_size_multiple=4,
         pad_to_length_multiple=64,
     )
-    loader = build_dataloader(data_config, batch_size=4, seed=0)
-    assert not isinstance(loader.batch_sampler, LengthBucketedDynamicBatchSampler)
+    loader = build_eval_dataloader(data_config, batch_size=4)
+    assert not isinstance(loader.batch_sampler, LengthBucketBatchSampler)
 
     batch_sizes: list[int] = []
     for batch_index, batch in enumerate(loader):
@@ -376,20 +320,18 @@ def test_collate_fn_supports_pad_to_length_multiple() -> None:
 def test_length_bucketed_dynamic_batch_sampler_supports_padding_noise() -> None:
     baseline_dataset = build_dummy_sampler_dataset(
         [256, 248, 240, 232, 224, 216, 208, 200],
-        length_bucketing=True,
     )
     noisy_dataset = build_dummy_sampler_dataset(
         [256, 248, 240, 232, 224, 216, 208, 200],
-        length_bucketing=True,
         bucket_padding_noise=0.5,
     )
-    baseline_sampler = LengthBucketedDynamicBatchSampler(
+    baseline_sampler = LengthBucketBatchSampler(
         dataset=baseline_dataset,
         batch_size=8,
         seed=23,
         shuffle=True,
     )
-    noisy_sampler = LengthBucketedDynamicBatchSampler(
+    noisy_sampler = LengthBucketBatchSampler(
         dataset=noisy_dataset,
         batch_size=8,
         seed=23,
@@ -408,7 +350,7 @@ def test_length_bucketed_dynamic_batch_sampler_len_matches_iteration_with_shuffl
         [256, 224, 192, 160, 128, 96, 64, 48, 32, 16],
         max_tokens_per_batch=512,
     )
-    sampler = LengthBucketedDynamicBatchSampler(
+    sampler = LengthBucketBatchSampler(
         dataset=dataset,
         batch_size=8,
         seed=23,
@@ -464,9 +406,8 @@ def test_decoder_language_model_always_ties_embeddings() -> None:
 def test_length_bucketed_dynamic_batch_sampler_is_deterministic_without_shuffle() -> None:
     dataset = build_dummy_sampler_dataset(
         [64, 56, 48, 40, 32, 24, 16, 8],
-        length_bucketing=True,
     )
-    sampler = LengthBucketedDynamicBatchSampler(
+    sampler = LengthBucketBatchSampler(
         dataset=dataset,
         batch_size=4,
         seed=23,
@@ -516,7 +457,8 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     dummy_batch = build_dummy_batch()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.train.build_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("midi2score.train.build_eval_dataloader", lambda *args, **kwargs: [dummy_batch])
         monkeypatch.setattr(
             "midi2score.train.evaluate_decoder_language_model_metrics",
             lambda *args, **kwargs: DecoderEvaluationMetrics(
@@ -561,11 +503,16 @@ def test_decoder_pretraining_loop_uses_fixed_validation_recipe(monkeypatch: pyte
         loss_mask=torch.ones((1, 3), dtype=torch.bool),
     )
 
-    def fake_build_loader(config: LmxDataConfig, *, batch_size: int, seed: int):
+    def fake_build_train_loader(config: LmxDataConfig, *, batch_size: int, seed: int):
         captured_calls.append((config, batch_size))
         return [dummy_batch]
 
-    monkeypatch.setattr("midi2score.train.build_dataloader", fake_build_loader)
+    def fake_build_eval_loader(config: LmxDataConfig, *, batch_size: int):
+        captured_calls.append((config, batch_size))
+        return [dummy_batch]
+
+    monkeypatch.setattr("midi2score.train.build_train_dataloader", fake_build_train_loader)
+    monkeypatch.setattr("midi2score.train.build_eval_dataloader", fake_build_eval_loader)
     monkeypatch.setattr(
         "midi2score.train.evaluate_decoder_language_model_metrics",
         lambda *args, **kwargs: DecoderEvaluationMetrics(
@@ -590,10 +537,8 @@ def test_decoder_pretraining_loop_uses_fixed_validation_recipe(monkeypatch: pyte
         split="training",
         max_length=64,
         sliding_window_stride=32,
-        length_bucketing=True,
         bucket_padding_noise=0.1,
         max_tokens_per_batch=128,
-        required_batch_size_multiple=4,
         pad_to_length_multiple=8,
     )
     training_config = TrainingConfig(
@@ -620,15 +565,9 @@ def test_decoder_pretraining_loop_uses_fixed_validation_recipe(monkeypatch: pyte
 
 
 def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
-    model_config, batch = build_small_real_batch()
+    model_config, batch = build_small_synthetic_batch()
     model = TransformerDecoderLM(model_config)
-    data_config = LmxDataConfig(
-        dataset_path="data/huggingface",
-        split="validation",
-        max_length=64,
-        sliding_window_stride=32,
-    )
-    loader = build_dataloader(data_config, batch_size=2, seed=0)
+    loader = [batch]
 
     loss = evaluate_decoder_language_model(
         model,
@@ -642,15 +581,9 @@ def test_evaluate_decoder_language_model_returns_finite_loss() -> None:
 
 
 def test_evaluate_decoder_language_model_metrics_returns_expected_fields() -> None:
-    model_config, _ = build_small_real_batch()
+    model_config, batch = build_small_synthetic_batch()
     model = TransformerDecoderLM(model_config)
-    data_config = LmxDataConfig(
-        dataset_path="data/huggingface",
-        split="validation",
-        max_length=64,
-        sliding_window_stride=32,
-    )
-    loader = build_dataloader(data_config, batch_size=2, seed=0)
+    loader = [batch]
 
     metrics = evaluate_decoder_language_model_metrics(
         model,
@@ -839,7 +772,8 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
     dummy_batch = build_dummy_batch()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.train.build_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("midi2score.train.build_eval_dataloader", lambda *args, **kwargs: [dummy_batch])
         monkeypatch.setattr(
             "midi2score.train.evaluate_decoder_language_model_metrics",
             lambda *args, **kwargs: DecoderEvaluationMetrics(
@@ -929,7 +863,7 @@ def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
     dummy_batch = build_dummy_batch()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.train.build_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
         run_decoder_pretraining_loop(model_config, data_config, first_stage)
 
         second_stage = TrainingConfig(
@@ -982,7 +916,7 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
         lambda: next(clock_values),
     )
 
-    monkeypatch.setattr("midi2score.train.build_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
+    monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
     result = run_decoder_pretraining_loop(model_config, data_config, training_config)
 
     assert result.stopped_due_to_time_budget is True
@@ -1032,7 +966,8 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
             evaluated_tokens=1,
         ),
     )
-    monkeypatch.setattr("midi2score.train.build_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
+    monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
+    monkeypatch.setattr("midi2score.train.build_eval_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
 
     result = run_decoder_pretraining_loop(model_config, data_config, training_config)
 

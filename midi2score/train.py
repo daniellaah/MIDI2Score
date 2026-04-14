@@ -12,7 +12,12 @@ from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
-from midi2score.data import LmxDataConfig, VALIDATION_MAX_LENGTH, build_dataloader
+from midi2score.data import (
+    LmxDataConfig,
+    VALIDATION_MAX_LENGTH,
+    build_eval_dataloader,
+    build_train_dataloader,
+)
 from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
 
 
@@ -325,17 +330,16 @@ def run_decoder_pretraining_loop(
         )
     torch.manual_seed(training_config.seed)
     device = resolve_device(training_config.device)
-    train_loader = build_dataloader(
+    train_loader = build_train_dataloader(
         data_config,
         batch_size=training_config.batch_size,
         seed=training_config.seed,
     )
     validation_loader = None
     if training_config.eval_every > 0:
-        validation_loader = build_dataloader(
+        validation_loader = build_eval_dataloader(
             replace(data_config, split="validation"),
             batch_size=training_config.eval_batch_size or training_config.batch_size,
-            seed=training_config.seed,
         )
 
     model = TransformerDecoderLM(model_config).to(device)

@@ -1,200 +1,124 @@
 # Length Bucketing
 
-## Goal
+## Purpose
 
-The purpose of `length bucketing` is to reduce padding waste within each batch and improve training throughput without changing the model architecture.
+This document records the batching method currently used for decoder pretraining experiments and the validated results that still matter.
 
-For decoder pretraining, the main batching problems are:
+The goal of length bucketing is to improve training efficiency without changing the model architecture or the validation protocol.
 
-1. Large length variance inside a batch causes excessive padding.
-2. With a fixed `batch_size`, long-sequence batches are too heavy while short-sequence batches are too light.
-3. Fully dynamic batch shapes can make allocator and kernel behavior unstable.
-
-The current data pipeline addresses these issues with a small set of batching controls.
-
-## Current Implementation
+## Scope
 
 Code location:
 - `midi2score/data.py`
 
-Supported configuration fields:
+Training-side controls:
+- `max_tokens_per_batch`
+- `bucket_padding_noise`
+- `pad_to_length_multiple`
 
-| Field | Purpose |
-| --- | --- |
-| `length_bucketing` | Enable length grouping on the training split |
-| `bucket_padding_noise` | Add small random noise to bucket sorting to avoid rigid length ordering |
-| `max_tokens_per_batch` | Build training batches under a token budget instead of a fixed sample count |
-| `required_batch_size_multiple` | Try to emit dynamic batches whose sample count matches a fixed multiple |
-| `pad_to_length_multiple` | Pad training batch length to a fixed multiple during collation to reduce shape diversity |
+Validation is intentionally fixed and does not depend on those controls.
 
-Public API:
+## Canonical Validation Protocol
 
-- `build_dataloader()`
-- `collate_fn()`
-- `LengthBucketedDynamicBatchSampler`
+All results in this document use the same validation recipe:
 
-## Batching Pipeline
+- `max_length = 1024`
+- `sliding_window_stride = 256`
+- fixed-order validation
+- fixed-batch validation
+- `eval_batch_size = 16`
+- token-weighted average loss over scored tokens
 
-### 1. Sliding Windows
+This is the only valid basis for cross-run comparison here.
 
-Original token sequences are expanded into sliding windows using:
+## Current Method
 
-- `max_length`
-- `sliding_window_stride`
+Training windows are built from tokenized sequences with:
 
-The sampler batches windows, not raw full-length sequences.
+- `max_length = 1024`
+- `sliding_window_stride = 256`
 
-### 2. Length Bucketing
+1. training windows are shuffled
+2. indices are grouped into large pools
+3. each pool is sorted by approximate length
+4. batches are emitted under a token budget
 
-When `length_bucketing` is enabled on the training split:
-
-1. Training examples are shuffled.
-2. Indices are split into large pools.
-3. Each pool is sorted by descending sequence length.
-4. If `bucket_padding_noise` is enabled, small random perturbations are added before sorting.
-
-This keeps similarly sized samples together while avoiding a completely deterministic ordering every epoch.
-
-### 3. Max Tokens Per Batch
-
-When `max_tokens_per_batch` is enabled, training batches are built dynamically instead of being split directly by a fixed sample count.
-
-The current budget rule is:
+The effective token-budget rule is:
 
 `round_up(max(sequence_length in batch), pad_to_length_multiple) * batch_size <= max_tokens_per_batch`
 
-This uses the effective padded batch length so the sampler budget matches the real collated shape.
+This means:
 
-In this setup:
+- `batch_size` is an upper bound on example count
+- `max_tokens_per_batch` is the real training budget
+- `pad_to_length_multiple` affects both collation shape and sampler budget
 
-- `batch_size` is treated as `max_examples_per_batch`
-- `max_tokens_per_batch` is treated as `token_budget_per_batch`
+## Why `pad_to_length_multiple` Matters
 
-### 4. Required Batch Size Multiple
+`pad_to_length_multiple`
+- acts on sequence length
+- rounds batch length up to a fixed multiple such as `32`, `64`, or `128`
+- reduces shape diversity
+- directly changes the padded shape used by attention and feed-forward compute
 
-When `required_batch_size_multiple > 1`:
+This was more useful than sample-count alignment in our experiments because the dominant constraint is `max_tokens_per_batch`. Under a tight token budget, regularizing sequence length helped more than trying to regularize the number of examples in each batch.
 
-- dynamic batches try to flush at a sample count aligned to that multiple
-- tail batches are still allowed to be smaller
-- under a tight token budget, some non-tail batches may still be smaller than the requested multiple
+## Validated Results
 
-This is a common engineering optimization for more regular kernel behavior.
+### 600s Sampler-Speed Sweep
 
-### 5. Pad To Length Multiple
+Selection rule:
+- choose the configuration with the highest `tokens/sec`
+- treat `valid_loss` here as a secondary monitoring field, not the selection metric
 
-Instead of implementing explicit batch-shape tables, the current pipeline uses `pad_to_length_multiple`.
+Validated sweep:
 
-During collation, batch length is rounded up to a fixed multiple such as:
+| max_tokens_per_batch | pad_to_length_multiple | valid_loss | toks/sec | status |
+| ---: | ---: | ---: | ---: | --- |
+| 14336 | 32 | 3.249211 | 44323.5 | keep |
+| 14336 | 64 | 3.234957 | 44066.1 | discard |
+| 14336 | 128 | 3.227507 | 43377.1 | discard |
+| 16384 | 32 | 3.061776 | 42693.5 | discard |
+| 16384 | 64 | 3.058532 | 42828.9 | discard |
+| 16384 | 128 | 3.058387 | 41682.8 | discard |
+| 18432 | 32 | 4.495638 | 37965.5 | discard |
+| 18432 | 64 | 4.543844 | 40838.4 | discard |
+| 18432 | 128 | 4.531093 | 41930.3 | discard |
 
-- `8`
-- `16`
-- `64`
+Interpretation:
 
-This reduces shape diversity while keeping the implementation simple.
+- `14336 + pad32` is the fastest short-budget configuration.
+- `16384 + pad64` is slightly slower at `600s`, but its loss profile is much better.
+- throughput alone is not sufficient for promotion to the long-budget baseline.
 
-## Why We Did Not Add Explicit Batch Shape Tables
+### 7200s Canonical Runs
 
-Some systems, especially fairseq-style pipelines, support a small predefined set of batch shapes. That can further reduce dynamic shape variation.
+Selection rule:
+- choose the configuration with the lowest `validation loss`
 
-For this project, that approach would make the pipeline heavier:
+| recipe | valid_loss | toks/sec | status |
+| --- | ---: | ---: | --- |
+| fixed batch baseline | 1.674948 | 28016.1 | discard |
+| `length_bucketing + max_tokens 16384 + pad64` | 1.636279 | 42033.8 | keep |
+| `length_bucketing + max_tokens 14336 + pad32` | 1.662629 | 40886.7 | discard |
 
-- the sampler would need to emit shape metadata
-- collation would need to obey external shapes instead of the batch's own maximum length
-- the DataLoader interface would become more complex
+Interpretation:
 
-For now, the lighter compromise is:
+- `length_bucketing + max_tokens 16384 + pad64` is the current best long-budget batching recipe.
+- `14336 + pad32` wins the `600s` throughput race but does not win the `7200s` objective.
+- the best validated improvement over the fixed-batch baseline is therefore:
+  - better `validation loss`
+  - much higher `tokens/sec`
 
-- `required_batch_size_multiple`
-- `pad_to_length_multiple`
+## Current Recommendation
 
-If shape instability remains a real bottleneck later, explicit batch shape tables can be reconsidered.
+Use the following batching recipe for current `7200s` decoder pretraining:
 
-## Practical Recommendations
-
-### Training
-
-Recommended defaults for training:
-
-- `length_bucketing = true`
-- `max_tokens_per_batch` as the main batch budget
-- `batch_size` only as an upper bound on example count
-- `bucket_padding_noise > 0`
-
-### Validation
-
-Validation should prioritize stability and repeatability over aggressive dynamic batching.
-
-Preferred properties:
-
-- fixed ordering
-- stable loss accounting
-- stable batch shape behavior
-- no dependence on training-side length bucketing or token-budget batching
-
-Current rule:
-
-- `build_dataloader()` uses separate internal train/eval paths
-- training may use `LengthBucketedDynamicBatchSampler`
-- validation always uses fixed batching, `shuffle = false`, and `pad_to_length_multiple = 1`
-- cross-run comparison should also keep `eval_batch_size` fixed
-
-### Moving to a Smaller GPU
-
-The most important portability knob is:
-
-- `max_tokens_per_batch`
-
-If the target GPU has less memory, batch size will not shrink automatically. The token budget must be reduced manually.
-
-## Experiment Results
-
-The table below summarizes the latest `600s` reruns under the canonical validation recipe:
-
-- fixed-batch validation
-- `shuffle = false`
-- no validation length bucketing
-- no validation token budget
-- `eval_batch_size = 16`
-
-Because some faster runs can still finish a validation pass after the `600s` boundary, the fairest comparison is the first shared validation point at `step=500`.
-
-### Latest 600s Comparison
-
-| exp | step500 val loss | toks/sec | step time | peak mem | description |
-| --- | ---: | ---: | ---: | ---: | --- |
-| 1 | 4.8384 | 24212.0 | 0.4594s | 35943.4 MiB | baseline |
-| 2 | 4.6188 | 31680.9 | 0.4927s | 107698.9 MiB | `length_bucketing + max_tokens_per_batch=16384` |
-| 3 | 4.6159 | 29999.6 | 0.5173s | 119031.0 MiB | exp2 + `bucket_padding_noise=0.1` |
-| 4 | 4.5809 | 35236.3 | 0.4376s | 73221.6 MiB | exp2 + `pad_to_length_multiple=64` |
-| 5 | 4.6592 | 39823.9 | 0.3814s | 89175.1 MiB | exp2 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
-| 6 | 4.6553 | 29824.0 | 0.5012s | 72226.5 MiB | exp5 + `required_batch_size_multiple=4` |
-
-### Run-Level Best Metrics
-
-These values are still useful for operational monitoring, but they should not be used as the primary fairness metric for fixed-wall-clock comparisons when some runs evaluate past the budget boundary.
-
-| exp | best val loss | elapsed | final step | description |
-| --- | ---: | ---: | ---: | --- |
-| 1 | 4.8384 | 600.09s | 823 | baseline |
-| 2 | 4.6188 | 600.43s | 724 | `length_bucketing + max_tokens_per_batch=16384` |
-| 3 | 4.6159 | 600.33s | 647 | exp2 + `bucket_padding_noise=0.1` |
-| 4 | 4.5809 | 600.13s | 848 | exp2 + `pad_to_length_multiple=64` |
-| 5 | 3.1303 | 726.55s | 1000 | exp2 + `bucket_padding_noise=0.1` + `pad_to_length_multiple=64` |
-| 6 | 4.6553 | 600.17s | 779 | exp5 + `required_batch_size_multiple=4` |
-
-### Takeaways
-
-- Under the canonical fixed validation recipe, `length bucketing + max_tokens_per_batch` is still clearly better than the plain baseline on both validation loss and throughput.
-- `bucket_padding_noise=0.1` gives only a weak loss gain and slightly hurts throughput.
-- `pad_to_length_multiple=64` is the strongest single follow-up change on top of `length_bucketing + max_tokens_per_batch=16384`.
-- combining `bucket_padding_noise=0.1` and `pad_to_length_multiple=64` is worse than using `pad_to_length_multiple=64` alone
-- `required_batch_size_multiple=4` does not help under the current token-budget regime.
-
-Current best direction for further batching experiments:
-
-- `length_bucketing = true`
 - `max_tokens_per_batch = 16384`
 - `pad_to_length_multiple = 64`
+- `bucket_padding_noise = 0.0`
+
+Use the canonical fixed validation protocol unchanged.
 
 ## References
 
@@ -204,9 +128,3 @@ Current best direction for further batching experiments:
   - [https://docs.allennlp.org/main/api/data/samplers/max_tokens_batch_sampler/](https://docs.allennlp.org/main/api/data/samplers/max_tokens_batch_sampler/)
 - fairseq dataset batching / `batch_by_size`
   - [https://fairseq.readthedocs.io/en/v0.10.2/_modules/fairseq/data/fairseq_dataset.html](https://fairseq.readthedocs.io/en/v0.10.2/_modules/fairseq/data/fairseq_dataset.html)
-- fairseq tasks docs: `required_batch_size_multiple`
-  - [https://fairseq.readthedocs.io/en/v0.10.2/tasks.html](https://fairseq.readthedocs.io/en/v0.10.2/tasks.html)
-- NVIDIA NeMo: dynamic batching and sequence packing
-  - [https://docs.nvidia.com/nemo/rl/latest/design-docs/sequence-packing-and-dynamic-batching.html](https://docs.nvidia.com/nemo/rl/latest/design-docs/sequence-packing-and-dynamic-batching.html)
-- NVIDIA Megatron Bridge: packed sequences
-  - [https://docs.nvidia.com/nemo/megatron-bridge/0.1.0/training/packed-sequences.html](https://docs.nvidia.com/nemo/megatron-bridge/0.1.0/training/packed-sequences.html)

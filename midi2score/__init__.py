@@ -1,11 +1,13 @@
 """MIDI2Score package."""
 
 from midi2score.data import (
-    LmxSlidingWindowDataset,
+    LmxEvalDataset,
     LmxBatch,
     LmxDataConfig,
-    LengthBucketedDynamicBatchSampler,
-    build_dataloader,
+    LmxTrainDataset,
+    LengthBucketBatchSampler,
+    build_eval_dataloader,
+    build_train_dataloader,
     collate_fn,
 )
 from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
@@ -23,13 +25,15 @@ __all__ = [
     "DecoderEvaluationMetrics",
     "DecoderLanguageModelConfig",
     "DecoderPretrainingResult",
-    "LmxSlidingWindowDataset",
+    "LmxEvalDataset",
     "LmxBatch",
     "LmxDataConfig",
-    "LengthBucketedDynamicBatchSampler",
+    "LmxTrainDataset",
+    "LengthBucketBatchSampler",
     "TrainingConfig",
     "TransformerDecoderLM",
-    "build_dataloader",
+    "build_eval_dataloader",
+    "build_train_dataloader",
     "build_lr_scheduler",
     "collate_fn",
     "evaluate_decoder_language_model",
