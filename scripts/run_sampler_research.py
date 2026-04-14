@@ -25,6 +25,7 @@ def main() -> None:
     print(f"[sampler-research] starting on commit {commit}", flush=True)
 
     stage_600 = build_stage_600_experiments()
+    stage_600_by_description = {spec["description"]: spec for spec in stage_600}
     completed_600: list[ExperimentResult] = []
     for experiment in stage_600:
         result = maybe_run_experiment(experiment, commit=commit, seen_descriptions=seen_descriptions)
@@ -43,7 +44,10 @@ def main() -> None:
         flush=True,
     )
 
-    stage_7200 = build_stage_7200_experiments(fastest_sampler)
+    stage_7200 = build_stage_7200_experiments(
+        fastest_sampler,
+        stage_600_spec=stage_600_by_description.get(fastest_sampler.description),
+    )
     for experiment in stage_7200:
         result = maybe_run_experiment(experiment, commit=commit, seen_descriptions=seen_descriptions)
         if result is not None:
@@ -298,7 +302,11 @@ def build_stage_600_experiments() -> list[dict[str, Any]]:
     ]
 
 
-def build_stage_7200_experiments(fastest_sampler: ExperimentResult) -> list[dict[str, Any]]:
+def build_stage_7200_experiments(
+    fastest_sampler: ExperimentResult,
+    *,
+    stage_600_spec: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
     experiments = [
         experiment(
             name="baseline_fixed_7200s",
@@ -314,7 +322,10 @@ def build_stage_7200_experiments(fastest_sampler: ExperimentResult) -> list[dict
             },
         )
     ]
-    sampler_settings = settings_from_description(fastest_sampler.description)
+    sampler_settings = settings_from_description(
+        fastest_sampler.description,
+        stage_600_spec=stage_600_spec,
+    )
     experiments.append(
         experiment(
             name=f"{sanitize_name(fastest_sampler.description)}_7200s",
@@ -589,7 +600,11 @@ def pick_fastest_sampler(results: list[ExperimentResult]) -> ExperimentResult | 
     return max(sampler_results, key=lambda result: result.tokens_per_second)
 
 
-def settings_from_description(description: str) -> dict[str, Any]:
+def settings_from_description(
+    description: str,
+    *,
+    stage_600_spec: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     settings = {
         "batch_size": 64,
         "data_updates": {
@@ -600,6 +615,9 @@ def settings_from_description(description: str) -> dict[str, Any]:
             "pad_to_length_multiple": 1,
         },
     }
+    if stage_600_spec is not None:
+        settings["batch_size"] = stage_600_spec["batch_size"]
+        settings["data_updates"].update(stage_600_spec["data_updates"])
     max_tokens_match = re.search(r"max_tokens(?:_per_batch)? (\d+)", description)
     if max_tokens_match is not None:
         settings["data_updates"]["max_tokens_per_batch"] = int(max_tokens_match.group(1))
