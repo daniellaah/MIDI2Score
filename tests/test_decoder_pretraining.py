@@ -374,6 +374,55 @@ def test_decoder_language_model_forward_produces_vocab_logits() -> None:
     )
 
 
+def test_decoder_language_model_supports_rope() -> None:
+    model_config, batch = build_small_synthetic_batch()
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=model_config.vocab_size,
+        d_model=model_config.d_model,
+        nhead=model_config.nhead,
+        num_layers=model_config.num_layers,
+        dim_feedforward=model_config.dim_feedforward,
+        max_length=model_config.max_length,
+        positional_encoding="rope",
+    )
+    model = TransformerDecoderLM(model_config)
+
+    logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+
+    assert logits.shape == (
+        batch.input_tokens.size(0),
+        batch.input_tokens.size(1),
+        model_config.vocab_size,
+    )
+
+
+def test_decoder_language_model_supports_optional_cross_attention_memory() -> None:
+    model_config, batch = build_small_synthetic_batch()
+    model = TransformerDecoderLM(model_config)
+    memory = torch.randn(
+        batch.input_tokens.size(0),
+        5,
+        model_config.d_model,
+    )
+    memory_padding_mask = torch.zeros(
+        (batch.input_tokens.size(0), 5),
+        dtype=torch.bool,
+    )
+
+    logits = model(
+        batch.input_tokens,
+        padding_mask=batch.padding_mask,
+        memory=memory,
+        memory_padding_mask=memory_padding_mask,
+    )
+
+    assert logits.shape == (
+        batch.input_tokens.size(0),
+        batch.input_tokens.size(1),
+        model_config.vocab_size,
+    )
+
+
 @pytest.mark.parametrize(("activation",), [("relu",), ("gelu",), ("swiglu",), ("geglu",)])
 def test_decoder_language_model_supports_activation_variants(activation: str) -> None:
     model_config, batch = build_small_synthetic_batch()
@@ -401,6 +450,32 @@ def test_decoder_language_model_always_ties_embeddings() -> None:
 
     assert logits.shape[-1] == model_config.vocab_size
     assert model.output_projection.weight is model.tgt_embedding.weight
+
+
+@pytest.mark.parametrize(("positional_encoding",), [("sinusoidal",), ("rope",)])
+def test_decoder_attention_exposes_linear_qkv_for_lora(positional_encoding: str) -> None:
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=128,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        max_length=64,
+        positional_encoding=positional_encoding,
+    )
+    model = TransformerDecoderLM(model_config)
+    attention = model.decoder.layers[0].self_attn
+
+    assert isinstance(attention.q_proj, torch.nn.Linear)
+    assert isinstance(attention.k_proj, torch.nn.Linear)
+    assert isinstance(attention.v_proj, torch.nn.Linear)
+    assert isinstance(attention.out_proj, torch.nn.Linear)
+
+    cross_attention = model.decoder.layers[0].cross_attn
+    assert isinstance(cross_attention.q_proj, torch.nn.Linear)
+    assert isinstance(cross_attention.k_proj, torch.nn.Linear)
+    assert isinstance(cross_attention.v_proj, torch.nn.Linear)
+    assert isinstance(cross_attention.out_proj, torch.nn.Linear)
 
 
 def test_length_bucketed_dynamic_batch_sampler_is_deterministic_without_shuffle() -> None:
