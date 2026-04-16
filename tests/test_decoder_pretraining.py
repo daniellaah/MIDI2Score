@@ -15,7 +15,7 @@ from midi2score.data import (
     build_train_dataloader,
     collate_fn,
 )
-from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
+from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLayer, TransformerDecoderLM
 from midi2score.train import (
     DecoderEvaluationMetrics,
     MpsMemoryTracker,
@@ -421,6 +421,56 @@ def test_decoder_language_model_supports_optional_cross_attention_memory() -> No
         batch.input_tokens.size(1),
         model_config.vocab_size,
     )
+
+
+def test_transformer_decoder_layer_keeps_ffn_norm_consistent_with_and_without_memory() -> None:
+    class TrackingNorm(torch.nn.Module):
+        def __init__(self, name: str, calls: list[str]) -> None:
+            super().__init__()
+            self.name = name
+            self.calls = calls
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            self.calls.append(self.name)
+            return x
+
+    class ZeroSelfAttention(torch.nn.Module):
+        def forward(self, x: torch.Tensor, *, tgt_padding_mask=None) -> torch.Tensor:
+            return torch.zeros_like(x)
+
+    class ZeroCrossAttention(torch.nn.Module):
+        def forward(self, x: torch.Tensor, *, memory: torch.Tensor, memory_padding_mask=None) -> torch.Tensor:
+            return torch.zeros_like(x)
+
+    class ZeroFeedForward(torch.nn.Module):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return torch.zeros_like(x)
+
+    layer = TransformerDecoderLayer(
+        d_model=32,
+        nhead=4,
+        dim_feedforward=64,
+        dropout=0.0,
+        activation="relu",
+        positional_encoding="rope",
+        max_length=64,
+    )
+    calls: list[str] = []
+    layer.self_attn_norm = TrackingNorm("self", calls)
+    layer.cross_attn_norm = TrackingNorm("cross", calls)
+    layer.ffn_norm = TrackingNorm("ffn", calls)
+    layer.self_attn = ZeroSelfAttention()
+    layer.cross_attn = ZeroCrossAttention()
+    layer.feedforward = ZeroFeedForward()
+
+    tgt = torch.randn(2, 8, 32)
+    layer(tgt)
+    assert calls == ["self", "ffn"]
+
+    calls.clear()
+    memory = torch.randn(2, 5, 32)
+    layer(tgt, memory=memory)
+    assert calls == ["self", "cross", "ffn"]
 
 
 @pytest.mark.parametrize(("activation",), [("relu",), ("gelu",), ("swiglu",), ("geglu",)])
