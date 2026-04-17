@@ -77,7 +77,7 @@ Validation is fixed across experiments:
 - training loop: `midi2score/train.py`
 - data pipeline: `midi2score/data.py`
 - experiment history: `docs/decoder_pretrain_exp.md`
-- batching notes: `docs/length_bucketing.md`
+- batching notes: `docs/data_preprocessing.md`
 
 ## References
 

@@ -3,6 +3,7 @@ import csv
 
 import pytest
 import torch
+from datasets import Dataset, DatasetDict
 
 from midi2score.data import (
     LmxBatch,
@@ -62,7 +63,6 @@ def build_dummy_sampler_dataset(
             dataset_path="data/huggingface",
             split="training",
             max_length=64,
-            sliding_window_stride=32,
             bucket_padding_noise=bucket_padding_noise,
             max_tokens_per_batch=max_tokens_per_batch,
             pad_to_length_multiple=pad_to_length_multiple,
@@ -83,7 +83,6 @@ def build_dummy_batching_dataset(
             dataset_path="data/huggingface",
             split="training",
             max_length=max(lengths),
-            sliding_window_stride=max(1, max(lengths) // 2),
             bucket_padding_noise=bucket_padding_noise,
             max_tokens_per_batch=max_tokens_per_batch,
             pad_to_length_multiple=pad_to_length_multiple,
@@ -114,12 +113,23 @@ def build_small_synthetic_batch() -> tuple[DecoderLanguageModelConfig, LmxBatch]
     return model_config, build_dummy_batch(batch_size=2, sequence_length=8)
 
 
+def build_temporary_dataset_dict(tmp_path: Path, training_rows: list[list[int]]) -> Path:
+    dataset_path = tmp_path / "dataset"
+    DatasetDict(
+        {
+            "training": Dataset.from_list([{"input_ids": row} for row in training_rows]),
+            "validation": Dataset.from_list([{"input_ids": [1, 2, 3, 4]}]),
+            "test": Dataset.from_list([{"input_ids": [1, 2, 3, 4]}]),
+        }
+    ).save_to_disk(str(dataset_path))
+    return dataset_path
+
+
 def test_language_model_dataloader_reads_real_dataset() -> None:
     data_config = LmxDataConfig(
-        dataset_path="data/huggingface",
+        dataset_path="data/bar_aware_chunk/training_bar_chunk_encoded_overlap2_full_dataset",
         split="training",
-        max_length=64,
-        sliding_window_stride=32,
+        max_length=1024,
     )
     batch = next(iter(build_train_dataloader(data_config, batch_size=2, seed=0)))
 
@@ -129,38 +139,44 @@ def test_language_model_dataloader_reads_real_dataset() -> None:
     assert batch.input_tokens[:, 0].ne(0).all()
 
 
-def test_sliding_window_expands_long_examples_and_covers_tail() -> None:
+def test_training_dataset_consumes_pregenerated_chunks_directly(tmp_path: Path) -> None:
+    dataset_path = build_temporary_dataset_dict(
+        tmp_path,
+        training_rows=[
+            [1, 2, 3, 4, 5],
+            [6, 7, 8, 9, 10, 11, 12],
+        ],
+    )
     config = LmxDataConfig(
-        dataset_path="data/huggingface",
+        dataset_path=str(dataset_path),
         split="training",
-        max_length=32,
-        sliding_window_stride=16,
+        max_length=8,
     )
+
     dataset = LmxTrainDataset(config)
-    long_index = next(
-        index
-        for index in range(len(dataset.dataset))
-        if len(dataset.dataset[index]["input_ids"]) > config.max_length * 3
-    )
-    raw_tokens = dataset.dataset[long_index]["input_ids"]
-    starts = [
-        spec.start
-        for spec in dataset.windows
-        if spec.raw_index == long_index
-    ]
 
-    assert len(starts) > 1
-    assert starts[0] == 0
-    assert starts[-1] == len(raw_tokens) - config.max_length
+    assert len(dataset.windows) == 2
+    assert [(window.start, window.length) for window in dataset.windows] == [(0, 5), (0, 7)]
+    assert dataset[0]["tokens"].tolist() == [1, 2, 3, 4, 5]
+    assert dataset[1]["tokens"].tolist() == [6, 7, 8, 9, 10, 11, 12]
 
-    last_window_dataset_index = next(
-        i
-        for i, spec in enumerate(dataset.windows)
-        if spec.raw_index == long_index and spec.start == starts[-1]
+
+def test_training_dataset_rejects_oversized_samples(tmp_path: Path) -> None:
+    dataset_path = build_temporary_dataset_dict(
+        tmp_path,
+        training_rows=[
+            [1, 2, 3, 4],
+            [5, 6, 7, 8, 9],
+        ],
     )
-    example = dataset[last_window_dataset_index]
-    assert example["tokens"].tolist() == raw_tokens[starts[-1] : starts[-1] + config.max_length]
-    assert example["loss_mask"].all()
+    config = LmxDataConfig(
+        dataset_path=str(dataset_path),
+        split="training",
+        max_length=4,
+    )
+
+    with pytest.raises(ValueError, match="Training samples must not exceed max_length"):
+        LmxTrainDataset(config)
 
 
 def test_validation_sliding_window_scores_each_target_token_once() -> None:
@@ -168,7 +184,6 @@ def test_validation_sliding_window_scores_each_target_token_once() -> None:
         dataset_path="data/huggingface",
         split="validation",
         max_length=32,
-        sliding_window_stride=16,
     )
     dataset = LmxEvalDataset(config)
     long_index = next(
@@ -194,13 +209,11 @@ def test_validation_dataset_ignores_passed_window_arguments() -> None:
         dataset_path="data/huggingface",
         split="validation",
         max_length=32,
-        sliding_window_stride=16,
     )
     wide_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="validation",
         max_length=2048,
-        sliding_window_stride=1024,
     )
 
     narrow_dataset = LmxEvalDataset(narrow_config)
@@ -232,6 +245,21 @@ def test_length_bucketed_dynamic_batch_sampler_groups_examples_by_length() -> No
     lengths = [dataset.sequence_length(index) for index in batch_indices]
 
     assert lengths == sorted(lengths, reverse=True)
+
+
+def test_dynamic_batch_sampler_without_length_bucketing_preserves_sample_order() -> None:
+    dataset = build_dummy_sampler_dataset([48, 12, 36, 64, 24, 8, 56, 16])
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=4,
+        seed=23,
+        shuffle=False,
+        length_bucketing=False,
+    )
+
+    batches = list(iter(sampler))
+
+    assert batches == [[0, 1, 2, 3], [4, 5, 6, 7]]
 
 
 def test_length_bucketed_dynamic_batch_sampler_respects_max_tokens_per_batch() -> None:
@@ -274,12 +302,26 @@ def test_build_dataloader_supports_dynamic_batch_size_with_token_budget() -> Non
     assert all(batch_size <= 8 for batch_size in batch_sizes)
 
 
+def test_build_dataloader_can_disable_length_bucketing() -> None:
+    dataset = build_dummy_batching_dataset(
+        [64, 60, 52, 48, 40, 36, 32, 28],
+        max_tokens_per_batch=192,
+    )
+    dataset.config.length_bucketing = False
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr("midi2score.data.LmxTrainDataset", lambda config: dataset)
+        loader = build_train_dataloader(dataset.config, batch_size=8, seed=0)
+
+        assert isinstance(loader.batch_sampler, LengthBucketBatchSampler)
+        assert loader.batch_sampler.length_bucketing is False
+
+
 def test_build_dataloader_keeps_validation_fixed_even_if_dynamic_fields_are_set() -> None:
     data_config = LmxDataConfig(
         dataset_path="data/huggingface",
         split="validation",
         max_length=256,
-        sliding_window_stride=128,
         bucket_padding_noise=0.1,
         max_tokens_per_batch=512,
         pad_to_length_multiple=64,
@@ -561,7 +603,6 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        sliding_window_stride=32,
     )
     training_config = TrainingConfig(
         seed=0,
@@ -661,7 +702,6 @@ def test_decoder_pretraining_loop_uses_fixed_validation_recipe(monkeypatch: pyte
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        sliding_window_stride=32,
         bucket_padding_noise=0.1,
         max_tokens_per_batch=128,
         pad_to_length_multiple=8,
@@ -881,7 +921,6 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        sliding_window_stride=32,
     )
 
     first_stage = TrainingConfig(
@@ -971,7 +1010,6 @@ def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        sliding_window_stride=32,
     )
 
     first_stage = TrainingConfig(
@@ -1022,7 +1060,6 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        sliding_window_stride=32,
     )
     training_config = TrainingConfig(
         seed=0,
@@ -1064,7 +1101,6 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
         dataset_path="data/huggingface",
         split="training",
         max_length=64,
-        sliding_window_stride=32,
     )
     training_config = TrainingConfig(
         seed=0,

@@ -14,7 +14,7 @@ from torch.utils.data import BatchSampler, DataLoader, Dataset
 PAD_TOKEN_ID = 0
 BUCKET_SIZE_MULTIPLIER = 50
 VALIDATION_MAX_LENGTH = 1024
-VALIDATION_SLIDING_WINDOW_STRIDE = 256
+VALIDATION_SLIDING_WINDOW_STRIDE = 512
 VALIDATION_PAD_TO_LENGTH_MULTIPLE = 1
 
 
@@ -22,8 +22,8 @@ VALIDATION_PAD_TO_LENGTH_MULTIPLE = 1
 class LmxDataConfig:
     dataset_path: str
     split: str = "training"
-    max_length: int = 512
-    sliding_window_stride: int = 256
+    max_length: int = 1024
+    length_bucketing: bool = True
     bucket_padding_noise: float = 0.0
     max_tokens_per_batch: int | None = None
     pad_to_length_multiple: int = 1
@@ -53,24 +53,16 @@ class LmxTrainDataset(Dataset):
         self.config = config
         self.dataset = _load_split_dataset(config.dataset_path, "training")
         self.windows: list[LmxWindow] = []
+
         for raw_index in range(len(self.dataset)):
             token_ids = self.dataset[raw_index]["input_ids"]
             total_length = len(token_ids)
-            if total_length <= config.max_length:
-                self.windows.append(LmxWindow(raw_index=raw_index, start=0, length=total_length))
-                continue
-            max_start = total_length - config.max_length
-            starts = list(range(0, max_start + 1, config.sliding_window_stride))
-            if starts[-1] != max_start:
-                starts.append(max_start)
-            for start in starts:
-                self.windows.append(
-                    LmxWindow(
-                        raw_index=raw_index,
-                        start=start,
-                        length=min(total_length - start, config.max_length),
-                    )
+            if total_length > config.max_length:
+                raise ValueError(
+                    "Training samples must not exceed max_length. "
+                    "Increase max_length or regenerate the training dataset."
                 )
+            self.windows.append(LmxWindow(raw_index=raw_index, start=0, length=total_length))
 
     def __len__(self) -> int:
         return len(self.windows)
@@ -147,6 +139,7 @@ class LengthBucketBatchSampler(BatchSampler):
         batch_size: int,
         seed: int,
         shuffle: bool,
+        length_bucketing: bool = True,
         max_tokens_per_batch: int | None = None,
     ) -> None:
         if batch_size <= 0:
@@ -162,9 +155,12 @@ class LengthBucketBatchSampler(BatchSampler):
         self.batch_size = batch_size
         self.seed = seed
         self.shuffle = shuffle
+        self.length_bucketing = length_bucketing
         self.max_tokens_per_batch = max_tokens_per_batch
         self.pad_to_length_multiple = dataset.config.pad_to_length_multiple
-        self.bucket_padding_noise = dataset.config.bucket_padding_noise if shuffle else 0.0
+        self.bucket_padding_noise = (
+            dataset.config.bucket_padding_noise if shuffle and length_bucketing else 0.0
+        )
         self.lengths = [dataset.sequence_length(index) for index in range(len(dataset))]
         self.epoch = 0
 
@@ -180,6 +176,8 @@ class LengthBucketBatchSampler(BatchSampler):
 
     def _planned_batches(self, generator: torch.Generator) -> list[list[int]]:
         indices = self._sample_indices(generator)
+        if not self.length_bucketing:
+            return self._build_batches_from_sorted_pool(indices)
         batches: list[list[int]] = []
         bucket_size = self.batch_size * BUCKET_SIZE_MULTIPLIER
         for start in range(0, len(indices), bucket_size):
@@ -248,6 +246,10 @@ class LengthBucketBatchSampler(BatchSampler):
             batches.append(current_batch)
         return batches
 
+def _effective_padded_length(length: int, pad_to_length_multiple: int) -> int:
+    if pad_to_length_multiple <= 1:
+        return length
+    return ((length + pad_to_length_multiple - 1) // pad_to_length_multiple) * pad_to_length_multiple
 
 @dataclass(slots=True)
 class LmxBatch:
@@ -306,6 +308,7 @@ def build_train_dataloader(
             batch_size=batch_size,
             seed=seed,
             shuffle=True,
+            length_bucketing=config.length_bucketing,
             max_tokens_per_batch=config.max_tokens_per_batch,
         ),
         num_workers=config.num_workers,
@@ -325,9 +328,3 @@ def build_eval_dataloader(
         num_workers=config.num_workers,
         collate_fn=partial(collate_fn, pad_to_length_multiple=VALIDATION_PAD_TO_LENGTH_MULTIPLE),
     )
-
-
-def _effective_padded_length(length: int, pad_to_length_multiple: int) -> int:
-    if pad_to_length_multiple <= 1:
-        return length
-    return ((length + pad_to_length_multiple - 1) // pad_to_length_multiple) * pad_to_length_multiple

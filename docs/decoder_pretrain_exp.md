@@ -16,7 +16,7 @@ Last updated: 2026-04-13
 
 ### Recipe
 
-- config: [`../configs/pretrain_rd_best.yaml`](../configs/pretrain_rd_best.yaml)
+- config: [`../configs/tmp/pretrain_rd_best.yaml`](../configs/tmp/pretrain_rd_best.yaml)
 - `max_length = 1024`
 - `sliding_window_stride = 256`
 - `d_model = 512`
@@ -176,7 +176,7 @@ Last updated: 2026-04-13
 
 ### Recipe
 
-- config: [`../configs/pretrain_rd_best.yaml`](../configs/pretrain_rd_best.yaml)
+- config: [`../configs/tmp/pretrain_rd_best.yaml`](../configs/tmp/pretrain_rd_best.yaml)
 - `max_length = 1024`
 - `sliding_window_stride = 256`
 - `d_model = 384`
