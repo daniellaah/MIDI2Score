@@ -1,6 +1,6 @@
-"""MIDI2Score package."""
+"""Pretraining package."""
 
-from midi2score.data import (
+from pretrain.data import (
     LmxEvalDataset,
     LmxBatch,
     LmxDataConfig,
@@ -10,8 +10,8 @@ from midi2score.data import (
     build_train_dataloader,
     collate_fn,
 )
-from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
-from midi2score.train import (
+from pretrain.decoder import DecoderLanguageModelConfig, TransformerDecoderLM
+from pretrain.trainer import (
     DecoderEvaluationMetrics,
     DecoderPretrainingResult,
     TrainingConfig,

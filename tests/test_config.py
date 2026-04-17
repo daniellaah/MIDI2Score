@@ -1,7 +1,7 @@
 import pytest
 
-from midi2score.model import DecoderLanguageModelConfig
-from midi2score.train import TrainingConfig
+from pretrain.decoder import DecoderLanguageModelConfig
+from pretrain.trainer import TrainingConfig
 
 
 def test_training_config_rejects_non_positive_time_budget() -> None:

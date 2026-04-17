@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from midi2score.config import PretrainConfig, load_pretrain_config
+from pretrain.config import PretrainConfig, load_pretrain_config
 
 
 def test_load_pretrain_config_reads_pretrain_yaml() -> None:

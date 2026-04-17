@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import yaml
 
-from midi2score.data import LmxDataConfig
-from midi2score.model import DecoderLanguageModelConfig
-from midi2score.train import TrainingConfig
+from pretrain.data import LmxDataConfig
+from pretrain.decoder import DecoderLanguageModelConfig
+from pretrain.trainer import TrainingConfig
 
 
 @dataclass(slots=True)

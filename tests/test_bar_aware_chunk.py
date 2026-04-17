@@ -6,7 +6,7 @@ import pytest
 from datasets import Dataset, DatasetDict, load_from_disk
 from tokenizers import Tokenizer
 
-from midi2score.bar_aware_chunk import (
+from pretrain.bar_aware_chunk import (
     apply_piece_boundary_tokens,
     build_bar_chunk_prototype_dataset_dict,
     build_explicit_lmx_token_byte_map,
@@ -192,7 +192,7 @@ def test_build_partition_encoded_bar_chunks_uses_partition_default_bpe_dropout(
         captured_dropouts.append(bpe_dropout)
         return Tokenizer.from_file("data/tokenizer_rd.json")
 
-    monkeypatch.setattr("midi2score.bar_aware_chunk._load_tokenizer", fake_load_tokenizer)
+    monkeypatch.setattr("pretrain.bar_aware_chunk._load_tokenizer", fake_load_tokenizer)
 
     build_partition_encoded_bar_chunks(
         dataset_root="data/PDMX_preprocessed_rd",

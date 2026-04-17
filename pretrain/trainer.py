@@ -12,13 +12,13 @@ from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
-from midi2score.data import (
+from pretrain.data import (
     LmxDataConfig,
     VALIDATION_MAX_LENGTH,
     build_eval_dataloader,
     build_train_dataloader,
 )
-from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLM
+from pretrain.decoder import DecoderLanguageModelConfig, TransformerDecoderLM
 
 
 @dataclass(slots=True)

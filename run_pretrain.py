@@ -9,8 +9,8 @@ from typing import Any
 
 import yaml
 
-from midi2score.config import load_pretrain_config
-from midi2score.train import run_decoder_pretraining_loop
+from pretrain.config import load_pretrain_config
+from pretrain.trainer import run_decoder_pretraining_loop
 
 
 def build_parser() -> argparse.ArgumentParser:

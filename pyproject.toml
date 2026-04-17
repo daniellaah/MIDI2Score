@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "midi2score"
+name = "pretrain"
 version = "0.1.0"
 description = "Minimal training framework for MIDI-to-Score sequence-to-sequence models."
 readme = "README.md"
@@ -37,4 +37,4 @@ target-version = "py311"
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["midi2score"]
+packages = ["pretrain"]

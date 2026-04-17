@@ -5,7 +5,7 @@ import pytest
 import torch
 from datasets import Dataset, DatasetDict
 
-from midi2score.data import (
+from pretrain.data import (
     LmxBatch,
     LmxDataConfig,
     LmxEvalDataset,
@@ -16,8 +16,8 @@ from midi2score.data import (
     build_train_dataloader,
     collate_fn,
 )
-from midi2score.model import DecoderLanguageModelConfig, TransformerDecoderLayer, TransformerDecoderLM
-from midi2score.train import (
+from pretrain.decoder import DecoderLanguageModelConfig, TransformerDecoderLayer, TransformerDecoderLM
+from pretrain.trainer import (
     DecoderEvaluationMetrics,
     MpsMemoryTracker,
     TrainingConfig,
@@ -288,7 +288,7 @@ def test_build_dataloader_supports_dynamic_batch_size_with_token_budget() -> Non
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.data.LmxTrainDataset", lambda config: dataset)
+        monkeypatch.setattr("pretrain.data.LmxTrainDataset", lambda config: dataset)
         loader = build_train_dataloader(dataset.config, batch_size=8, seed=0)
 
         assert isinstance(loader.batch_sampler, LengthBucketBatchSampler)
@@ -310,7 +310,7 @@ def test_build_dataloader_can_disable_length_bucketing() -> None:
     dataset.config.length_bucketing = False
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.data.LmxTrainDataset", lambda config: dataset)
+        monkeypatch.setattr("pretrain.data.LmxTrainDataset", lambda config: dataset)
         loader = build_train_dataloader(dataset.config, batch_size=8, seed=0)
 
         assert isinstance(loader.batch_sampler, LengthBucketBatchSampler)
@@ -623,10 +623,10 @@ def test_decoder_pretraining_loop_saves_checkpoint(tmp_path: Path) -> None:
     dummy_batch = build_dummy_batch()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
-        monkeypatch.setattr("midi2score.train.build_eval_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("pretrain.trainer.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("pretrain.trainer.build_eval_dataloader", lambda *args, **kwargs: [dummy_batch])
         monkeypatch.setattr(
-            "midi2score.train.evaluate_decoder_language_model_metrics",
+            "pretrain.trainer.evaluate_decoder_language_model_metrics",
             lambda *args, **kwargs: DecoderEvaluationMetrics(
                 loss=1.0,
                 perplexity=2.0,
@@ -677,10 +677,10 @@ def test_decoder_pretraining_loop_uses_fixed_validation_recipe(monkeypatch: pyte
         captured_calls.append((config, batch_size))
         return [dummy_batch]
 
-    monkeypatch.setattr("midi2score.train.build_train_dataloader", fake_build_train_loader)
-    monkeypatch.setattr("midi2score.train.build_eval_dataloader", fake_build_eval_loader)
+    monkeypatch.setattr("pretrain.trainer.build_train_dataloader", fake_build_train_loader)
+    monkeypatch.setattr("pretrain.trainer.build_eval_dataloader", fake_build_eval_loader)
     monkeypatch.setattr(
-        "midi2score.train.evaluate_decoder_language_model_metrics",
+        "pretrain.trainer.evaluate_decoder_language_model_metrics",
         lambda *args, **kwargs: DecoderEvaluationMetrics(
             loss=1.0,
             perplexity=2.0,
@@ -936,10 +936,10 @@ def test_resume_continues_from_saved_step(tmp_path: Path) -> None:
     dummy_batch = build_dummy_batch()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
-        monkeypatch.setattr("midi2score.train.build_eval_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("pretrain.trainer.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("pretrain.trainer.build_eval_dataloader", lambda *args, **kwargs: [dummy_batch])
         monkeypatch.setattr(
-            "midi2score.train.evaluate_decoder_language_model_metrics",
+            "pretrain.trainer.evaluate_decoder_language_model_metrics",
             lambda *args, **kwargs: DecoderEvaluationMetrics(
                 loss=1.0,
                 perplexity=2.0,
@@ -1026,7 +1026,7 @@ def test_resume_restores_scheduler_state(tmp_path: Path) -> None:
     dummy_batch = build_dummy_batch()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
+        monkeypatch.setattr("pretrain.trainer.build_train_dataloader", lambda *args, **kwargs: [dummy_batch])
         run_decoder_pretraining_loop(model_config, data_config, first_stage)
 
         second_stage = TrainingConfig(
@@ -1074,11 +1074,11 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
 
     clock_values = iter([0.0, 0.1, 0.6, 1.2, 1.8])
     monkeypatch.setattr(
-        "midi2score.train.time.monotonic",
+        "pretrain.trainer.time.monotonic",
         lambda: next(clock_values),
     )
 
-    monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
+    monkeypatch.setattr("pretrain.trainer.build_train_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
     result = run_decoder_pretraining_loop(model_config, data_config, training_config)
 
     assert result.stopped_due_to_time_budget is True
@@ -1118,7 +1118,7 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
     validation_losses = iter([5.0, 5.5, 5.6])
 
     monkeypatch.setattr(
-        "midi2score.train.evaluate_decoder_language_model_metrics",
+        "pretrain.trainer.evaluate_decoder_language_model_metrics",
         lambda *args, **kwargs: DecoderEvaluationMetrics(
             loss=next(validation_losses),
             perplexity=1.0,
@@ -1127,8 +1127,8 @@ def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tm
             evaluated_tokens=1,
         ),
     )
-    monkeypatch.setattr("midi2score.train.build_train_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
-    monkeypatch.setattr("midi2score.train.build_eval_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
+    monkeypatch.setattr("pretrain.trainer.build_train_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
+    monkeypatch.setattr("pretrain.trainer.build_eval_dataloader", lambda *args, **kwargs: [build_dummy_batch()])
 
     result = run_decoder_pretraining_loop(model_config, data_config, training_config)
 
