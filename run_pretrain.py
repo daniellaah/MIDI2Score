@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/pretrain_baseline.yaml"),
+        default=Path("configs/pretrain.yaml"),
         help="Path to the base YAML config.",
     )
     parser.add_argument(
