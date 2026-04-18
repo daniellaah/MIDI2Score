@@ -16,6 +16,7 @@ dependencies = [
     "matplotlib>=3.10,<4.0",
     "numpy>=2.3,<3.0",
     "pyyaml>=6.0.3,<7.0",
+    "setuptools>=80,<81",
     "tensorboard>=2.19,<3.0",
     "tokenizers>=0.22.2",
     "torch>=2.7,<2.8",
