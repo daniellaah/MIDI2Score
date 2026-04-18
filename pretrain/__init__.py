@@ -11,13 +11,16 @@ from pretrain.data import (
     collate_fn,
 )
 from pretrain.decoder import DecoderLanguageModelConfig, TransformerDecoderLM
-from pretrain.trainer import (
+from pretrain.evaluate import (
     DecoderEvaluationMetrics,
+    evaluate_checkpoint,
+    evaluate_decoder_language_model,
+    evaluate_decoder_language_model_metrics,
+)
+from pretrain.trainer import (
     DecoderPretrainingResult,
     TrainingConfig,
     build_lr_scheduler,
-    evaluate_decoder_language_model,
-    evaluate_decoder_language_model_metrics,
     run_decoder_pretraining_loop,
 )
 
@@ -36,6 +39,7 @@ __all__ = [
     "build_train_dataloader",
     "build_lr_scheduler",
     "collate_fn",
+    "evaluate_checkpoint",
     "evaluate_decoder_language_model",
     "evaluate_decoder_language_model_metrics",
     "run_decoder_pretraining_loop",

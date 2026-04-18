@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import math
 from dataclasses import asdict, dataclass
@@ -580,3 +581,90 @@ def _load_tokenizer(tokenizer_path: str | Path, bpe_dropout: float) -> Tokenizer
 
 def _default_bpe_dropout_for_partition(partition: str) -> float:
     return 0.1 if partition == "training" else 0.0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate offline bar-aware training chunks.")
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        default=Path("data/PDMX_preprocessed_rd"),
+        help="Root directory containing raw LMX files and dataset_info_with_partitions.csv.",
+    )
+    parser.add_argument(
+        "--partition",
+        default="training",
+        help="Dataset partition to chunk. Usually training.",
+    )
+    parser.add_argument(
+        "--tokenizer-path",
+        type=Path,
+        default=Path("data/tokenizer_rd.json"),
+        help="Path to the tokenizer JSON.",
+    )
+    parser.add_argument(
+        "--base-dataset-path",
+        type=Path,
+        default=Path("data/huggingface"),
+        help="Base HF DatasetDict used to reuse validation and test splits.",
+    )
+    parser.add_argument(
+        "--output-dataset-path",
+        type=Path,
+        required=True,
+        help="Output path for the generated HF DatasetDict.",
+    )
+    parser.add_argument(
+        "--output-jsonl-path",
+        type=Path,
+        default=None,
+        help="Optional JSONL dump of generated encoded chunks.",
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=1024,
+        help="Maximum encoded chunk length.",
+    )
+    parser.add_argument(
+        "--overlap-bars",
+        type=int,
+        default=2,
+        help="Number of overlapping bars between adjacent chunks.",
+    )
+    parser.add_argument(
+        "--piece-limit",
+        type=int,
+        default=None,
+        help="Optional limit on the number of pieces to process.",
+    )
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    chunks = build_partition_encoded_bar_chunks(
+        dataset_root=args.dataset_root,
+        partition=args.partition,
+        tokenizer_path=args.tokenizer_path,
+        max_length=args.max_length,
+        overlap_bars=args.overlap_bars,
+        piece_limit=args.piece_limit,
+    )
+    save_bar_chunk_prototype_dataset_dict(
+        chunks,
+        base_dataset_path=args.base_dataset_path,
+        output_path=args.output_dataset_path,
+    )
+    if args.output_jsonl_path is not None:
+        write_encoded_bar_chunks_jsonl(chunks, args.output_jsonl_path)
+
+    print(f"partition={args.partition}")
+    print(f"chunk_count={len(chunks)}")
+    print(f"output_dataset_path={args.output_dataset_path.resolve()}")
+    if args.output_jsonl_path is not None:
+        print(f"output_jsonl_path={args.output_jsonl_path.resolve()}")
+
+
+if __name__ == "__main__":
+    main()

@@ -164,6 +164,11 @@ class LengthBucketBatchSampler(BatchSampler):
         self.lengths = [dataset.sequence_length(index) for index in range(len(dataset))]
         self.epoch = 0
 
+    def set_epoch(self, epoch: int) -> None:
+        if epoch < 0:
+            raise ValueError("epoch must be non-negative.")
+        self.epoch = epoch
+
     def __iter__(self):
         generator = torch.Generator().manual_seed(self.seed + self.epoch)
         self.epoch += 1

@@ -39,6 +39,11 @@ def test_training_config_rejects_invalid_min_lr_ratio() -> None:
         TrainingConfig(min_lr_ratio=1.5)
 
 
+def test_training_config_rejects_non_positive_epoch() -> None:
+    with pytest.raises(ValueError, match="epoch"):
+        TrainingConfig(epoch=0)
+
+
 def test_training_config_rejects_non_positive_early_stopping_patience() -> None:
     with pytest.raises(ValueError, match="early_stopping_patience"):
         TrainingConfig(early_stopping_patience=0, eval_every=1)

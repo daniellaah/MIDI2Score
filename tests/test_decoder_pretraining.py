@@ -1087,6 +1087,107 @@ def test_time_budget_stops_pretraining_early(monkeypatch: pytest.MonkeyPatch, tm
     assert result.elapsed_seconds == pytest.approx(1.8)
 
 
+def test_epoch_budget_stops_after_requested_number_of_epochs(monkeypatch: pytest.MonkeyPatch) -> None:
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=5000,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        max_length=VALIDATION_MAX_LENGTH,
+    )
+    data_config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=64,
+    )
+    training_config = TrainingConfig(
+        seed=0,
+        batch_size=4,
+        epoch=2,
+        num_steps=10,
+        log_every=10,
+        eval_every=0,
+        device="cpu",
+    )
+
+    dummy_batch = build_dummy_batch()
+    monkeypatch.setattr(
+        "pretrain.trainer.build_train_dataloader",
+        lambda *args, **kwargs: [dummy_batch, dummy_batch, dummy_batch],
+    )
+
+    result = run_decoder_pretraining_loop(model_config, data_config, training_config)
+
+    assert result.final_step == 6
+    assert len(result.losses) == 6
+    assert result.stopped_due_to_time_budget is False
+    assert result.stopped_due_to_early_stopping is False
+
+
+def test_resume_sets_batch_sampler_to_resumed_epoch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "resume-epoch.pt"
+    model_config = DecoderLanguageModelConfig(
+        vocab_size=5000,
+        d_model=32,
+        nhead=4,
+        num_layers=2,
+        dim_feedforward=64,
+        max_length=VALIDATION_MAX_LENGTH,
+    )
+    data_config = LmxDataConfig(
+        dataset_path="data/huggingface",
+        split="training",
+        max_length=64,
+    )
+    torch.save(
+        {
+            "model_state": TransformerDecoderLM(model_config).state_dict(),
+            "step": 4,
+            "best_validation_loss": 1.0,
+        },
+        checkpoint_path,
+    )
+    training_config = TrainingConfig(
+        seed=0,
+        batch_size=4,
+        epoch=2,
+        num_steps=6,
+        log_every=10,
+        eval_every=0,
+        device="cpu",
+        resume_checkpoint_path=str(checkpoint_path),
+    )
+
+    dummy_batch = build_dummy_batch()
+
+    class RecordingBatchSampler:
+        def __init__(self) -> None:
+            self.epochs: list[int] = []
+
+        def set_epoch(self, epoch: int) -> None:
+            self.epochs.append(epoch)
+
+    class RecordingLoader:
+        def __init__(self) -> None:
+            self.batch_sampler = RecordingBatchSampler()
+
+        def __len__(self) -> int:
+            return 3
+
+        def __iter__(self):
+            return iter([dummy_batch, dummy_batch, dummy_batch])
+
+    loader = RecordingLoader()
+
+    monkeypatch.setattr("pretrain.trainer.build_train_dataloader", lambda *args, **kwargs: loader)
+
+    result = run_decoder_pretraining_loop(model_config, data_config, training_config)
+
+    assert loader.batch_sampler.epochs[0] == 1
+    assert result.final_step == 6
+
+
 def test_early_stopping_stops_after_patience(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "early-stop.pt"
     model_config = DecoderLanguageModelConfig(

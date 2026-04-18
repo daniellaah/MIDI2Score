@@ -19,6 +19,13 @@ from pretrain.data import (
     build_train_dataloader,
 )
 from pretrain.decoder import DecoderLanguageModelConfig, TransformerDecoderLM
+from pretrain.evaluate import (
+    DecoderEvaluationMetrics,
+    MpsMemoryTracker,
+    evaluate_decoder_language_model,
+    evaluate_decoder_language_model_metrics,
+    resolve_device,
+)
 
 
 @dataclass(slots=True)
@@ -33,6 +40,7 @@ class TrainingConfig:
     grad_clip_norm: float = 2.0
     warmup_steps: int = 0
     min_lr_ratio: float = 0.0
+    epoch: int | None = None
     num_steps: int = 10
     max_duration_seconds: float | None = None
     early_stopping_patience: int | None = None
@@ -69,6 +77,8 @@ class TrainingConfig:
             raise ValueError("warmup_steps must be non-negative.")
         if not 0.0 <= self.min_lr_ratio <= 1.0:
             raise ValueError("min_lr_ratio must be between 0 and 1.")
+        if self.epoch is not None and self.epoch <= 0:
+            raise ValueError("epoch must be positive when provided.")
         if self.num_steps <= 0:
             raise ValueError("num_steps must be positive.")
         if self.max_duration_seconds is not None and self.max_duration_seconds <= 0.0:
@@ -88,15 +98,6 @@ class TrainingConfig:
 
     def to_dict(self) -> dict[str, int | float | str | None]:
         return asdict(self)
-
-
-@dataclass(slots=True)
-class DecoderEvaluationMetrics:
-    loss: float
-    perplexity: float
-    token_accuracy: float
-    top5_accuracy: float
-    evaluated_tokens: int
 
 
 @dataclass(slots=True)
@@ -158,41 +159,6 @@ class TrainingLogger:
             self._writer.close()
 
 
-@dataclass(slots=True)
-class MpsMemoryTracker:
-    enabled: bool
-    peak_memory_bytes: int = 0
-
-    @classmethod
-    def for_device(cls, device: torch.device | str) -> "MpsMemoryTracker":
-        return cls(enabled=_supports_mps_memory_tracking(device))
-
-    def record(self) -> None:
-        if not self.enabled:
-            return
-        self.peak_memory_bytes = max(
-            self.peak_memory_bytes,
-            int(torch.mps.driver_allocated_memory()),
-        )
-
-def resolve_device(requested_device: str) -> str:
-    if requested_device != "auto":
-        return requested_device
-    if torch.cuda.is_available():
-        return "cuda"
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
-
-def _supports_mps_memory_tracking(device: torch.device | str) -> bool:
-    if str(device) != "mps":
-        return False
-    if not hasattr(torch, "mps"):
-        return False
-    return hasattr(torch.mps, "driver_allocated_memory")
-
-
 def save_checkpoint(path: str, payload: dict) -> None:
     checkpoint_path = Path(path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -242,80 +208,13 @@ def build_lr_scheduler(optimizer: Optimizer, training_config: TrainingConfig) ->
     return LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
-def evaluate_decoder_language_model(
-    model: TransformerDecoderLM,
-    loader,
-    *,
-    pad_token_id: int,
-    device: torch.device | str,
-    num_batches: int | None = None,
-    mps_memory_tracker: MpsMemoryTracker | None = None,
-) -> float:
-    return evaluate_decoder_language_model_metrics(
-        model,
-        loader,
-        pad_token_id=pad_token_id,
-        device=device,
-        num_batches=num_batches,
-        mps_memory_tracker=mps_memory_tracker,
-    ).loss
-
-
-def evaluate_decoder_language_model_metrics(
-    model: TransformerDecoderLM,
-    loader,
-    *,
-    pad_token_id: int,
-    device: torch.device | str,
-    num_batches: int | None = None,
-    mps_memory_tracker: MpsMemoryTracker | None = None,
-) -> DecoderEvaluationMetrics:
-    model.eval()
-    total_loss = 0.0
-    total_valid_tokens = 0
-    total_correct_tokens = 0
-    total_top5_correct_tokens = 0
-
-    with torch.no_grad():
-        for batch_index, batch in enumerate(loader, start=1):
-            batch = batch.to(device)
-            if mps_memory_tracker is not None:
-                mps_memory_tracker.record()
-            logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-            if mps_memory_tracker is not None:
-                mps_memory_tracker.record()
-            flat_targets = batch.output_tokens.reshape(-1)
-            valid_mask = flat_targets.ne(pad_token_id)
-            if batch.loss_mask is not None:
-                valid_mask &= batch.loss_mask.reshape(-1)
-            valid_targets = flat_targets[valid_mask]
-            if valid_targets.numel() > 0:
-                flat_logits = logits.reshape(-1, logits.size(-1))[valid_mask]
-                total_loss += float(
-                    F.cross_entropy(
-                        flat_logits.float(),
-                        valid_targets,
-                        reduction="sum",
-                    ).item()
-                )
-                predictions = flat_logits.argmax(dim=-1)
-                topk = flat_logits.topk(k=min(5, flat_logits.size(-1)), dim=-1).indices
-                total_valid_tokens += int(valid_targets.numel())
-                total_correct_tokens += int(predictions.eq(valid_targets).sum().item())
-                total_top5_correct_tokens += int(
-                    topk.eq(valid_targets.unsqueeze(-1)).any(dim=-1).sum().item()
-                )
-            if num_batches is not None and batch_index >= num_batches:
-                break
-
-    average_loss = total_loss / total_valid_tokens
-    return DecoderEvaluationMetrics(
-        loss=average_loss,
-        perplexity=float(torch.exp(torch.tensor(average_loss)).item()),
-        token_accuracy=total_correct_tokens / total_valid_tokens,
-        top5_accuracy=total_top5_correct_tokens / total_valid_tokens,
-        evaluated_tokens=total_valid_tokens,
-    )
+def _set_train_loader_epoch(train_loader, epoch: int) -> None:
+    batch_sampler = getattr(train_loader, "batch_sampler", None)
+    if batch_sampler is None:
+        return
+    set_epoch = getattr(batch_sampler, "set_epoch", None)
+    if callable(set_epoch):
+        set_epoch(epoch)
 
 
 def run_decoder_pretraining_loop(
@@ -376,7 +275,10 @@ def run_decoder_pretraining_loop(
         best_step = start_step
         optimizer_state_loaded = resume_state.optimizer_loaded
 
-    iterator = iter(train_loader)
+    steps_per_epoch = len(train_loader)
+    start_epoch = start_step // steps_per_epoch
+    start_step_in_epoch = start_step % steps_per_epoch
+    epoch_budget_reached = False
     started_at = time.monotonic()
     cumulative_step_seconds = 0.0
     cumulative_tokens = 0
@@ -386,146 +288,187 @@ def run_decoder_pretraining_loop(
     time_to_target_validation_loss_seconds: float | None = None
 
     try:
-        for step in range(start_step + 1, training_config.num_steps + 1):
-            if (
-                training_config.max_duration_seconds is not None
-                and step > start_step + 1
-                and time.monotonic() - started_at >= training_config.max_duration_seconds
-            ):
-                stopped_due_to_time_budget = True
-                break
-            try:
-                batch = next(iterator)
-            except StopIteration:
-                iterator = iter(train_loader)
-                batch = next(iterator)
-
-            model.train()
-            optimizer.zero_grad(set_to_none=True)
-            batch = batch.to(device)
-            mps_memory_tracker.record()
-            step_started_at = time.monotonic()
-            logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
-            mps_memory_tracker.record()
-            loss = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1)).float(),
-                batch.output_tokens.reshape(-1),
-                ignore_index=model_config.pad_token_id,
-            )
-            loss.backward()
-            mps_memory_tracker.record()
-            clip_grad_norm_(model.parameters(), max_norm=training_config.grad_clip_norm)
-            optimizer.step()
-            scheduler.step()
-            mps_memory_tracker.record()
-
-            step_elapsed_seconds = time.monotonic() - step_started_at
-            step_tokens = int(batch.output_tokens.ne(model_config.pad_token_id).sum().item())
-            cumulative_step_seconds += step_elapsed_seconds
-            cumulative_tokens += step_tokens
-            loss_value = float(loss.item())
-            losses.append(loss_value)
-            final_step = step
-            logger.log_scalar(step=step, split="train", value=loss_value)
-            logger.log_scalar(step=step, split="train", metric="step_time_seconds", value=step_elapsed_seconds)
-            logger.log_scalar(
-                step=step,
-                split="train",
-                metric="tokens_per_second",
-                value=step_tokens / max(step_elapsed_seconds, 1e-12),
-            )
-            if (
-                training_config.max_duration_seconds is not None
-                and time.monotonic() - started_at >= training_config.max_duration_seconds
-            ):
-                stopped_due_to_time_budget = True
+        current_step = start_step
+        epoch_index = start_epoch
+        while current_step < training_config.num_steps:
+            if training_config.epoch is not None and epoch_index >= training_config.epoch:
+                epoch_budget_reached = True
                 break
 
-            if step % training_config.log_every == 0:
-                print(
-                    f"step={step} pretrain_loss={loss_value:.4f} "
-                    f"step_time={step_elapsed_seconds:.4f}s "
-                    f"tokens_per_second={step_tokens / max(step_elapsed_seconds, 1e-12):.1f} "
-                    f"device={device}"
-                )
+            _set_train_loader_epoch(train_loader, epoch_index)
+            iterator = iter(train_loader)
+            if epoch_index == start_epoch and start_step_in_epoch > 0:
+                for _ in range(start_step_in_epoch):
+                    try:
+                        next(iterator)
+                    except StopIteration as exc:
+                        raise RuntimeError("Failed to resume within the current epoch.") from exc
+                start_step_in_epoch = 0
 
-            if validation_loader is not None and step % training_config.eval_every == 0:
-                metrics = evaluate_decoder_language_model_metrics(
-                    model,
-                    validation_loader,
-                    pad_token_id=model_config.pad_token_id,
-                    device=device,
-                    num_batches=training_config.num_eval_batches,
-                    mps_memory_tracker=mps_memory_tracker,
-                )
-                validation_losses.append((step, metrics.loss))
-                logger.log_scalar(step=step, split="validation", value=metrics.loss)
-                logger.log_scalar(step=step, split="validation", metric="perplexity", value=metrics.perplexity)
-                logger.log_scalar(step=step, split="validation", metric="token_accuracy", value=metrics.token_accuracy)
-                logger.log_scalar(step=step, split="validation", metric="top5_accuracy", value=metrics.top5_accuracy)
-                print(
-                    f"step={step} validation_loss={metrics.loss:.4f} "
-                    f"perplexity={metrics.perplexity:.4f} "
-                    f"token_acc={metrics.token_accuracy:.4f} "
-                    f"top5_acc={metrics.top5_accuracy:.4f} "
-                    f"device={device}"
-                )
+            for batch in iterator:
+                step = current_step + 1
                 if (
-                    training_config.target_validation_loss is not None
-                    and time_to_target_validation_loss_seconds is None
-                    and metrics.loss <= training_config.target_validation_loss
+                    training_config.max_duration_seconds is not None
+                    and step > start_step + 1
+                    and time.monotonic() - started_at >= training_config.max_duration_seconds
                 ):
-                    time_to_target_validation_loss_seconds = time.monotonic() - started_at
-                    logger.log_scalar(
-                        step=step,
-                        split="validation",
-                        metric="time_to_target_validation_loss_seconds",
-                        value=time_to_target_validation_loss_seconds,
-                    )
-
-                improved = best_validation_loss is None or (
-                    metrics.loss < best_validation_loss - training_config.early_stopping_min_delta
-                )
-                if improved:
-                    best_validation_loss = metrics.loss
-                    best_step = step
-                    consecutive_non_improving_evals = 0
-                    if training_config.save_best_checkpoint_path is not None:
-                        save_checkpoint(
-                            training_config.save_best_checkpoint_path,
-                            _checkpoint_payload(
-                                model=model,
-                                optimizer=optimizer,
-                                scheduler=scheduler,
-                                model_config=model_config,
-                                data_config=data_config,
-                                training_config=training_config,
-                                step=step,
-                                best_validation_loss=best_validation_loss,
-                            ),
-                        )
-                else:
-                    consecutive_non_improving_evals += 1
-
-                if (
-                    training_config.early_stopping_patience is not None
-                    and consecutive_non_improving_evals >= training_config.early_stopping_patience
-                ):
-                    stopped_due_to_early_stopping = True
-                    print(
-                        "early_stopping_triggered "
-                        f"step={step} best_step={best_step} "
-                        f"best_validation_loss={best_validation_loss:.4f} "
-                        f"patience={training_config.early_stopping_patience} "
-                        f"min_delta={training_config.early_stopping_min_delta}"
-                    )
+                    stopped_due_to_time_budget = True
                     break
+
+                model.train()
+                optimizer.zero_grad(set_to_none=True)
+                batch = batch.to(device)
+                mps_memory_tracker.record()
+                step_started_at = time.monotonic()
+                logits = model(batch.input_tokens, padding_mask=batch.padding_mask)
+                mps_memory_tracker.record()
+                loss = F.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)).float(),
+                    batch.output_tokens.reshape(-1),
+                    ignore_index=model_config.pad_token_id,
+                )
+                loss.backward()
+                mps_memory_tracker.record()
+                clip_grad_norm_(model.parameters(), max_norm=training_config.grad_clip_norm)
+                optimizer.step()
+                scheduler.step()
+                mps_memory_tracker.record()
+
+                step_elapsed_seconds = time.monotonic() - step_started_at
+                step_tokens = int(batch.output_tokens.ne(model_config.pad_token_id).sum().item())
+                cumulative_step_seconds += step_elapsed_seconds
+                cumulative_tokens += step_tokens
+                loss_value = float(loss.item())
+                losses.append(loss_value)
+                current_step = step
+                final_step = step
+                logger.log_scalar(step=step, split="train", value=loss_value)
+                logger.log_scalar(
+                    step=step,
+                    split="train",
+                    metric="step_time_seconds",
+                    value=step_elapsed_seconds,
+                )
+                logger.log_scalar(
+                    step=step,
+                    split="train",
+                    metric="tokens_per_second",
+                    value=step_tokens / max(step_elapsed_seconds, 1e-12),
+                )
                 if (
                     training_config.max_duration_seconds is not None
                     and time.monotonic() - started_at >= training_config.max_duration_seconds
                 ):
                     stopped_due_to_time_budget = True
                     break
+
+                if step % training_config.log_every == 0:
+                    print(
+                        f"step={step} pretrain_loss={loss_value:.4f} "
+                        f"step_time={step_elapsed_seconds:.4f}s "
+                        f"tokens_per_second={step_tokens / max(step_elapsed_seconds, 1e-12):.1f} "
+                        f"device={device}"
+                    )
+
+                if validation_loader is not None and step % training_config.eval_every == 0:
+                    metrics = evaluate_decoder_language_model_metrics(
+                        model,
+                        validation_loader,
+                        pad_token_id=model_config.pad_token_id,
+                        device=device,
+                        num_batches=training_config.num_eval_batches,
+                        mps_memory_tracker=mps_memory_tracker,
+                    )
+                    validation_losses.append((step, metrics.loss))
+                    logger.log_scalar(step=step, split="validation", value=metrics.loss)
+                    logger.log_scalar(step=step, split="validation", metric="perplexity", value=metrics.perplexity)
+                    logger.log_scalar(
+                        step=step,
+                        split="validation",
+                        metric="token_accuracy",
+                        value=metrics.token_accuracy,
+                    )
+                    logger.log_scalar(
+                        step=step,
+                        split="validation",
+                        metric="top5_accuracy",
+                        value=metrics.top5_accuracy,
+                    )
+                    print(
+                        f"step={step} validation_loss={metrics.loss:.4f} "
+                        f"perplexity={metrics.perplexity:.4f} "
+                        f"token_acc={metrics.token_accuracy:.4f} "
+                        f"top5_acc={metrics.top5_accuracy:.4f} "
+                        f"device={device}"
+                    )
+                    if (
+                        training_config.target_validation_loss is not None
+                        and time_to_target_validation_loss_seconds is None
+                        and metrics.loss <= training_config.target_validation_loss
+                    ):
+                        time_to_target_validation_loss_seconds = time.monotonic() - started_at
+                        logger.log_scalar(
+                            step=step,
+                            split="validation",
+                            metric="time_to_target_validation_loss_seconds",
+                            value=time_to_target_validation_loss_seconds,
+                        )
+
+                    improved = best_validation_loss is None or (
+                        metrics.loss < best_validation_loss - training_config.early_stopping_min_delta
+                    )
+                    if improved:
+                        best_validation_loss = metrics.loss
+                        best_step = step
+                        consecutive_non_improving_evals = 0
+                        if training_config.save_best_checkpoint_path is not None:
+                            save_checkpoint(
+                                training_config.save_best_checkpoint_path,
+                                _checkpoint_payload(
+                                    model=model,
+                                    optimizer=optimizer,
+                                    scheduler=scheduler,
+                                    model_config=model_config,
+                                    data_config=data_config,
+                                    training_config=training_config,
+                                    step=step,
+                                    best_validation_loss=best_validation_loss,
+                                ),
+                            )
+                    else:
+                        consecutive_non_improving_evals += 1
+
+                    if (
+                        training_config.early_stopping_patience is not None
+                        and consecutive_non_improving_evals >= training_config.early_stopping_patience
+                    ):
+                        stopped_due_to_early_stopping = True
+                        print(
+                            "early_stopping_triggered "
+                            f"step={step} best_step={best_step} "
+                            f"best_validation_loss={best_validation_loss:.4f} "
+                            f"patience={training_config.early_stopping_patience} "
+                            f"min_delta={training_config.early_stopping_min_delta}"
+                        )
+                        break
+                    if (
+                        training_config.max_duration_seconds is not None
+                        and time.monotonic() - started_at >= training_config.max_duration_seconds
+                    ):
+                        stopped_due_to_time_budget = True
+                        break
+
+                if stopped_due_to_time_budget or stopped_due_to_early_stopping:
+                    break
+
+            if stopped_due_to_time_budget or stopped_due_to_early_stopping:
+                break
+            epoch_index += 1
+            if current_step >= training_config.num_steps:
+                break
+
+        if epoch_budget_reached and final_step == start_step:
+            final_step = start_step
     finally:
         logger.close()
 
