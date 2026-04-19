@@ -29,8 +29,8 @@ class DecoderLanguageModelConfig:
             raise ValueError("d_model must be divisible by nhead.")
         if self.activation not in {"relu", "gelu", "swiglu", "geglu"}:
             raise ValueError("activation must be relu, gelu, swiglu, or geglu.")
-        if self.positional_encoding not in {"sinusoidal", "rope"}:
-            raise ValueError("positional_encoding must be sinusoidal or rope.")
+        if self.positional_encoding not in {"sinusoidal", "rope", "learned", "alibi"}:
+            raise ValueError("positional_encoding must be sinusoidal, rope, learned, or alibi.")
         if self.positional_encoding == "rope" and (self.d_model // self.nhead) % 2 != 0:
             raise ValueError("RoPE requires an even attention head dimension.")
 
@@ -67,10 +67,22 @@ class ZeroPositionalEncoding(nn.Module):
         )
 
 
+class LearnedPositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, max_length: int) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(max_length, d_model)
+
+    def forward(self, tokens: Tensor) -> Tensor:
+        positions = torch.arange(tokens.size(1), device=tokens.device)
+        return self.embedding(positions).unsqueeze(0)
+
+
 def build_positional_encoding(positional_encoding: str, d_model: int, max_length: int) -> nn.Module:
     if positional_encoding == "sinusoidal":
         return SinusoidalPositionalEncoding(d_model, max_length)
-    if positional_encoding == "rope":
+    if positional_encoding == "learned":
+        return LearnedPositionalEncoding(d_model, max_length)
+    if positional_encoding in {"rope", "alibi"}:
         return ZeroPositionalEncoding(d_model)
     raise ValueError(f"Unsupported positional_encoding {positional_encoding!r}.")
 
@@ -160,12 +172,30 @@ class CausalSelfAttention(nn.Module):
         self.nhead = nhead
         self.head_dim = d_model // nhead
         self.use_rope = positional_encoding == "rope"
+        self.use_alibi = positional_encoding == "alibi"
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
         self.attention_dropout = dropout
         self.rotary = RotaryEmbedding(self.head_dim, max_length=max_length) if self.use_rope else None
+        self.register_buffer("alibi_slopes", self._build_alibi_slopes(nhead), persistent=False)
+
+    @staticmethod
+    def _build_alibi_slopes(nhead: int) -> Tensor:
+        return torch.pow(2.0, -8.0 * torch.arange(1, nhead + 1, dtype=torch.float32) / nhead)
+
+    def _build_alibi_bias(
+        self,
+        *,
+        sequence_length: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Tensor:
+        positions = torch.arange(sequence_length, device=device)
+        relative_positions = positions.unsqueeze(0) - positions.unsqueeze(1)
+        bias = self.alibi_slopes.to(device=device, dtype=dtype).view(1, self.nhead, 1, 1)
+        return bias * relative_positions.view(1, 1, sequence_length, sequence_length)
 
     def forward(self, x: Tensor, *, tgt_padding_mask: Tensor | None = None) -> Tensor:
         batch_size, sequence_length, d_model = x.shape
@@ -182,8 +212,8 @@ class CausalSelfAttention(nn.Module):
             query = apply_rotary_embedding(query, cos, sin)
             key = apply_rotary_embedding(key, cos, sin)
         attention_mask = None
-        use_causal_flag = tgt_padding_mask is None
-        if tgt_padding_mask is not None:
+        use_causal_flag = tgt_padding_mask is None and not self.use_alibi
+        if tgt_padding_mask is not None or self.use_alibi:
             attention_mask = torch.zeros(
                 (batch_size, 1, sequence_length, sequence_length),
                 dtype=query.dtype,
@@ -193,10 +223,17 @@ class CausalSelfAttention(nn.Module):
                 build_causal_mask(sequence_length, device=x.device).unsqueeze(0).unsqueeze(0),
                 float("-inf"),
             )
-            attention_mask = attention_mask.masked_fill(
-                tgt_padding_mask[:, None, None, :],
-                float("-inf"),
-            )
+            if self.use_alibi:
+                attention_mask = attention_mask + self._build_alibi_bias(
+                    sequence_length=sequence_length,
+                    device=x.device,
+                    dtype=query.dtype,
+                )
+            if tgt_padding_mask is not None:
+                attention_mask = attention_mask.masked_fill(
+                    tgt_padding_mask[:, None, None, :],
+                    float("-inf"),
+                )
         output = F.scaled_dot_product_attention(
             query,
             key,
