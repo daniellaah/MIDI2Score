@@ -160,7 +160,6 @@ Code:
 - entrypoint: [`run_pretrain.py`](run_pretrain.py)
 - config loading: [`pretrain/config.py`](pretrain/config.py)
 - training loop: [`pretrain/trainer.py`](pretrain/trainer.py)
-- experiment history: [`exp/decoder_pretrain_exp.md`](exp/decoder_pretrain_exp.md)
 
 ## File structure
 
@@ -176,8 +175,6 @@ Code:
 │   ├── lb_off.yaml
 │   ├── lb_on.yaml
 │   └── pretrain.yaml
-├── exp/
-│   └── decoder_pretrain_exp.md
 ├── pretrain/
 │   ├── __init__.py
 │   ├── bar_aware_chunk.py
