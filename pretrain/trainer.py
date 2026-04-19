@@ -233,12 +233,14 @@ def run_decoder_pretraining_loop(
         data_config,
         batch_size=training_config.batch_size,
         seed=training_config.seed,
+        pad_token_id=model_config.pad_token_id,
     )
     validation_loader = None
     if training_config.eval_every > 0:
         validation_loader = build_eval_dataloader(
             replace(data_config, split="validation"),
             batch_size=training_config.eval_batch_size or training_config.batch_size,
+            pad_token_id=model_config.pad_token_id,
         )
 
     model = TransformerDecoderLM(model_config).to(device)

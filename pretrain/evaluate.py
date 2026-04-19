@@ -167,7 +167,11 @@ def evaluate_checkpoint(
         device=resolved_device,
         model_config=model_config,
     )
-    loader = build_eval_dataloader(data_config, batch_size=batch_size)
+    loader = build_eval_dataloader(
+        data_config,
+        batch_size=batch_size,
+        pad_token_id=resolved_model_config.pad_token_id,
+    )
     tracker = MpsMemoryTracker.for_device(resolved_device)
     metrics = evaluate_decoder_language_model_metrics(
         model,

@@ -11,7 +11,6 @@ from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import BatchSampler, DataLoader, Dataset
 
-PAD_TOKEN_ID = 0
 BUCKET_SIZE_MULTIPLIER = 50
 VALIDATION_MAX_LENGTH = 1024
 VALIDATION_SLIDING_WINDOW_STRIDE = 512
@@ -85,7 +84,7 @@ class LmxTrainDataset(Dataset):
 class LmxEvalDataset(Dataset):
     def __init__(self, config: LmxDataConfig) -> None:
         self.config = config
-        self.dataset = _load_split_dataset(config.dataset_path, "validation")
+        self.dataset = _load_split_dataset(config.dataset_path, config.split)
         self.windows: list[LmxWindow] = []
         step = min(VALIDATION_SLIDING_WINDOW_STRIDE, VALIDATION_MAX_LENGTH - 1)
         for raw_index in range(len(self.dataset)):
@@ -226,13 +225,12 @@ class LengthBucketBatchSampler(BatchSampler):
 
         for index in pool:
             sequence_length = self.lengths[index]
-            if not current_batch:
-                effective_length = _effective_padded_length(sequence_length, self.pad_to_length_multiple)
-                if effective_length > self.max_tokens_per_batch:
-                    raise ValueError(
-                        "A single sequence exceeds max_tokens_per_batch after padding. "
-                        "Increase max_tokens_per_batch or reduce max_length."
-                    )
+            effective_single_length = _effective_padded_length(sequence_length, self.pad_to_length_multiple)
+            if not current_batch and effective_single_length > self.max_tokens_per_batch:
+                raise ValueError(
+                    "A single sequence exceeds max_tokens_per_batch after padding. "
+                    "Increase max_tokens_per_batch or reduce max_length."
+                )
 
             prospective_max_length = max(current_max_length, sequence_length)
             prospective_batch_size = len(current_batch) + 1
@@ -243,6 +241,11 @@ class LengthBucketBatchSampler(BatchSampler):
                 batches.append(current_batch)
                 current_batch = []
                 current_max_length = 0
+                if effective_single_length > self.max_tokens_per_batch:
+                    raise ValueError(
+                        "A single sequence exceeds max_tokens_per_batch after padding. "
+                        "Increase max_tokens_per_batch or reduce max_length."
+                    )
 
             current_batch.append(index)
             current_max_length = max(current_max_length, sequence_length)
@@ -275,12 +278,13 @@ class LmxBatch:
 def collate_fn(
     examples: list[dict[str, Tensor]],
     *,
+    pad_token_id: int = 0,
     pad_to_length_multiple: int = 1,
 ) -> LmxBatch:
     tokens = pad_sequence(
         [example["tokens"] for example in examples],
         batch_first=True,
-        padding_value=PAD_TOKEN_ID,
+        padding_value=pad_token_id,
     )
     loss_mask = pad_sequence(
         [example["loss_mask"] for example in examples],
@@ -289,13 +293,13 @@ def collate_fn(
     )
     padded_length = _effective_padded_length(tokens.size(1), pad_to_length_multiple)
     if padded_length > tokens.size(1):
-        tokens = F.pad(tokens, (0, padded_length - tokens.size(1)), value=PAD_TOKEN_ID)
+        tokens = F.pad(tokens, (0, padded_length - tokens.size(1)), value=pad_token_id)
     if padded_length - 1 > loss_mask.size(1):
         loss_mask = F.pad(loss_mask, (0, padded_length - 1 - loss_mask.size(1)), value=False)
     return LmxBatch(
         input_tokens=tokens[:, :-1],
         output_tokens=tokens[:, 1:],
-        padding_mask=tokens[:, :-1].eq(PAD_TOKEN_ID),
+        padding_mask=tokens[:, :-1].eq(pad_token_id),
         loss_mask=loss_mask,
     )
 
@@ -304,6 +308,8 @@ def build_train_dataloader(
     config: LmxDataConfig,
     batch_size: int,
     seed: int,
+    *,
+    pad_token_id: int = 0,
 ) -> DataLoader[LmxBatch]:
     dataset = LmxTrainDataset(config)
     return DataLoader(
@@ -317,13 +323,19 @@ def build_train_dataloader(
             max_tokens_per_batch=config.max_tokens_per_batch,
         ),
         num_workers=config.num_workers,
-        collate_fn=partial(collate_fn, pad_to_length_multiple=config.pad_to_length_multiple),
+        collate_fn=partial(
+            collate_fn,
+            pad_token_id=pad_token_id,
+            pad_to_length_multiple=config.pad_to_length_multiple,
+        ),
     )
 
 
 def build_eval_dataloader(
     config: LmxDataConfig,
     batch_size: int,
+    *,
+    pad_token_id: int = 0,
 ) -> DataLoader[LmxBatch]:
     dataset = LmxEvalDataset(config)
     return DataLoader(
@@ -331,5 +343,9 @@ def build_eval_dataloader(
         batch_size=batch_size,
         shuffle=False,
         num_workers=config.num_workers,
-        collate_fn=partial(collate_fn, pad_to_length_multiple=VALIDATION_PAD_TO_LENGTH_MULTIPLE),
+        collate_fn=partial(
+            collate_fn,
+            pad_token_id=pad_token_id,
+            pad_to_length_multiple=VALIDATION_PAD_TO_LENGTH_MULTIPLE,
+        ),
     )
