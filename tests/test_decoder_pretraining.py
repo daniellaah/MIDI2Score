@@ -230,6 +230,35 @@ def test_validation_dataset_ignores_passed_window_arguments() -> None:
     assert max(window.length for window in narrow_dataset.windows[:100]) <= VALIDATION_MAX_LENGTH
 
 
+def test_eval_dataset_uses_requested_split(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset"
+    DatasetDict(
+        {
+            "training": Dataset.from_list([{"input_ids": [1, 2, 3, 4]}]),
+            "validation": Dataset.from_list([{"input_ids": [1, 10, 11, 2]}]),
+            "test": Dataset.from_list([{"input_ids": [1, 20, 21, 2]}]),
+        }
+    ).save_to_disk(str(dataset_path))
+
+    validation_dataset = LmxEvalDataset(
+        LmxDataConfig(
+            dataset_path=str(dataset_path),
+            split="validation",
+            max_length=1024,
+        )
+    )
+    test_dataset = LmxEvalDataset(
+        LmxDataConfig(
+            dataset_path=str(dataset_path),
+            split="test",
+            max_length=1024,
+        )
+    )
+
+    assert validation_dataset[0]["tokens"].tolist() == [1, 10, 11, 2]
+    assert test_dataset[0]["tokens"].tolist() == [1, 20, 21, 2]
+
+
 def test_length_bucketed_dynamic_batch_sampler_groups_examples_by_length() -> None:
     dataset = build_dummy_sampler_dataset(
         [48, 12, 36, 64, 24, 8, 56, 16],
@@ -279,6 +308,24 @@ def test_length_bucketed_dynamic_batch_sampler_respects_max_tokens_per_batch() -
         lengths = [dataset.sequence_length(index) for index in batch_indices]
         padded_length = max(lengths)
         assert padded_length * len(batch_indices) <= 128
+
+
+def test_dynamic_batch_sampler_without_length_bucketing_rejects_oversized_single_sequence_after_flush() -> None:
+    dataset = build_dummy_sampler_dataset(
+        [48, 160],
+        max_tokens_per_batch=128,
+    )
+    sampler = LengthBucketBatchSampler(
+        dataset=dataset,
+        batch_size=8,
+        seed=23,
+        shuffle=False,
+        length_bucketing=False,
+        max_tokens_per_batch=dataset.config.max_tokens_per_batch,
+    )
+
+    with pytest.raises(ValueError, match="A single sequence exceeds max_tokens_per_batch"):
+        list(iter(sampler))
 
 
 def test_build_dataloader_supports_dynamic_batch_size_with_token_budget() -> None:
@@ -357,6 +404,25 @@ def test_collate_fn_supports_pad_to_length_multiple() -> None:
     assert batch.output_tokens.shape[1] + 1 == 8
     assert batch.loss_mask is not None
     assert batch.loss_mask.shape[1] == 7
+
+
+def test_collate_fn_uses_configured_pad_token_id() -> None:
+    examples = [
+        {
+            "tokens": torch.tensor([5, 6, 7, 8], dtype=torch.long),
+            "loss_mask": torch.tensor([True, True, True], dtype=torch.bool),
+        },
+        {
+            "tokens": torch.tensor([5, 6], dtype=torch.long),
+            "loss_mask": torch.tensor([True], dtype=torch.bool),
+        },
+    ]
+
+    batch = collate_fn(examples, pad_token_id=99, pad_to_length_multiple=4)
+
+    assert batch.input_tokens.tolist()[1][-1] == 99
+    assert batch.output_tokens.tolist()[1][-1] == 99
+    assert batch.padding_mask.tolist()[1][-1] is True
 
 
 def test_length_bucketed_dynamic_batch_sampler_supports_padding_noise() -> None:
@@ -670,11 +736,11 @@ def test_decoder_pretraining_loop_uses_fixed_validation_recipe(monkeypatch: pyte
         loss_mask=torch.ones((1, 3), dtype=torch.bool),
     )
 
-    def fake_build_train_loader(config: LmxDataConfig, *, batch_size: int, seed: int):
+    def fake_build_train_loader(config: LmxDataConfig, *, batch_size: int, seed: int, pad_token_id: int):
         captured_calls.append((config, batch_size))
         return [dummy_batch]
 
-    def fake_build_eval_loader(config: LmxDataConfig, *, batch_size: int):
+    def fake_build_eval_loader(config: LmxDataConfig, *, batch_size: int, pad_token_id: int):
         captured_calls.append((config, batch_size))
         return [dummy_batch]
 
