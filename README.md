@@ -75,7 +75,7 @@ Core settings:
 - `nhead = 8`
 - `num_layers = 4`
 - `dim_feedforward = 2048`
-- `dropout = 0.05`
+- `dropout = 0.1`
 - activation: `swiglu`
 - normalization: `rmsnorm`
 - residual layout: `pre_norm`
