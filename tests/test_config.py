@@ -75,15 +75,18 @@ def test_decoder_language_model_config_rejects_unknown_activation() -> None:
 
 def test_decoder_language_model_config_rejects_unknown_positional_encoding() -> None:
     with pytest.raises(ValueError, match="positional_encoding"):
-        DecoderLanguageModelConfig(vocab_size=128, positional_encoding="alibi")
+        DecoderLanguageModelConfig(vocab_size=128, positional_encoding="unknown")
 
 
-def test_decoder_language_model_config_accepts_rope() -> None:
+@pytest.mark.parametrize(("positional_encoding",), [("rope",), ("learned",), ("alibi",)])
+def test_decoder_language_model_config_accepts_supported_positional_encodings(
+    positional_encoding: str,
+) -> None:
     config = DecoderLanguageModelConfig(
         vocab_size=128,
         d_model=32,
         nhead=4,
-        positional_encoding="rope",
+        positional_encoding=positional_encoding,
     )
 
-    assert config.positional_encoding == "rope"
+    assert config.positional_encoding == positional_encoding

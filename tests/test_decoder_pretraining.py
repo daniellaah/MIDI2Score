@@ -416,7 +416,8 @@ def test_decoder_language_model_forward_produces_vocab_logits() -> None:
     )
 
 
-def test_decoder_language_model_supports_rope() -> None:
+@pytest.mark.parametrize(("positional_encoding",), [("rope",), ("learned",), ("alibi",)])
+def test_decoder_language_model_supports_supported_positional_encodings(positional_encoding: str) -> None:
     model_config, batch = build_small_synthetic_batch()
     model_config = DecoderLanguageModelConfig(
         vocab_size=model_config.vocab_size,
@@ -425,7 +426,7 @@ def test_decoder_language_model_supports_rope() -> None:
         num_layers=model_config.num_layers,
         dim_feedforward=model_config.dim_feedforward,
         max_length=model_config.max_length,
-        positional_encoding="rope",
+        positional_encoding=positional_encoding,
     )
     model = TransformerDecoderLM(model_config)
 
@@ -544,7 +545,7 @@ def test_decoder_language_model_always_ties_embeddings() -> None:
     assert model.output_projection.weight is model.tgt_embedding.weight
 
 
-@pytest.mark.parametrize(("positional_encoding",), [("sinusoidal",), ("rope",)])
+@pytest.mark.parametrize(("positional_encoding",), [("sinusoidal",), ("rope",), ("learned",), ("alibi",)])
 def test_decoder_attention_exposes_linear_qkv_for_lora(positional_encoding: str) -> None:
     model_config = DecoderLanguageModelConfig(
         vocab_size=128,
