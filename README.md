@@ -64,42 +64,6 @@ Current settings:
 
 Use [`analysis/length_bucketing_analysis.ipynb`](analysis/length_bucketing_analysis.ipynb) to benchmark the speed difference between `length_bucketing = true` and `false`.
 
-## Validation set
-
-The validation recipe is fixed:
-
-- sliding-window validation
-- `max_length = 1024`
-- `stride = 512`
-- overlapping targets counted once through `loss_mask` ([Hugging Face fixed-length perplexity guidance](https://huggingface.co/docs/transformers/perplexity))
-- `eval_batch_size = 16`
-- full validation uses `num_eval_batches = null`
-
-Evaluation code:
-
-- metrics implementation: [`pretrain/evaluate.py`](pretrain/evaluate.py)
-- evaluation entry: [`run_pretrain.py`](run_pretrain.py)
-
-Evaluate a checkpoint on the validation split:
-
-```bash
-uv run python run_pretrain.py \
-  --eval-mode \
-  --config configs/pretrain.yaml \
-  --checkpoint artifacts/runs/<run_dir>/best.pt \
-  --split validation
-```
-
-Evaluate a checkpoint on the test split:
-
-```bash
-uv run python run_pretrain.py \
-  --eval-mode \
-  --config configs/pretrain.yaml \
-  --checkpoint artifacts/runs/<run_dir>/best.pt \
-  --split test
-```
-
 ## Model
 
 The current model is a decoder-only Transformer language model for next-token prediction over linearized MusicXML token ids.
@@ -115,13 +79,10 @@ Core settings:
 - activation: `swiglu`
 - normalization: `rmsnorm`
 - residual layout: `pre_norm`
-- positional encoding: `sinusoidal`
+- positional encoding: `rope`
 - embedding/output weight tying: enabled
 - `max_length = 1024`
 
-Code:
-
-- model: [`pretrain/decoder.py`](pretrain/decoder.py)
 
 ## Training
 
@@ -141,7 +102,10 @@ Core settings:
 - `warmup_steps = 500`
 - `min_lr_ratio = 0.1`
 - `batch_size = 64`
-- default wall-clock budget: `7200s`
+- `epoch = 24`
+- `eval_every = 500`
+- `early_stopping_patience = 10`
+- `early_stopping_min_delta = 0.001`
 
 Run training:
 
@@ -155,11 +119,27 @@ Run a short verification job:
 uv run python run_pretrain.py --config configs/tmp/pretrain_600s_verify.yaml
 ```
 
-Code:
+## Validation set
 
-- entrypoint: [`run_pretrain.py`](run_pretrain.py)
-- config loading: [`pretrain/config.py`](pretrain/config.py)
-- training loop: [`pretrain/trainer.py`](pretrain/trainer.py)
+The validation recipe is fixed:
+
+- sliding-window validation
+- `max_length = 1024`
+- `stride = 512`
+- overlapping targets counted once through `loss_mask` ([Hugging Face fixed-length perplexity guidance](https://huggingface.co/docs/transformers/perplexity))
+- `eval_batch_size = 16`
+- full validation uses `num_eval_batches = null`
+
+Evaluate a checkpoint on the validation/test split:
+
+```bash
+uv run python run_pretrain.py \
+  --eval-mode \
+  --config configs/pretrain.yaml \
+  --checkpoint artifacts/runs/<run_dir>/best.pt \
+  --split {validation/test}
+```
+
 
 ## File structure
 
