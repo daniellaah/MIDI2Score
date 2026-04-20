@@ -76,7 +76,7 @@ Core settings:
 - `num_layers = 4`
 - `dim_feedforward = 2048`
 - `dropout = 0.1`
-- activation: `swiglu`
+- activation: `gelu`
 - normalization: `rmsnorm`
 - residual layout: `pre_norm`
 - positional encoding: `rope`
